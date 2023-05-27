@@ -9,3 +9,5 @@ license = "MIT"
 hal = { package = "esp32-hal", version = "0.12.0" }
 esp-backtrace = { version = "0.7.0", features = ["esp32", "panic-handler", "exception-handler", "print-uart"] }
 esp-println       = { version = "0.5.0", features = ["esp32"] }
+ssd1306 = "0.7.1"
+embedded-graphics = "0.7.1"
