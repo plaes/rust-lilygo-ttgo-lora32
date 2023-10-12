@@ -2,7 +2,8 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-use esp_println::println;
+use embassy_executor::Executor;
+use embassy_time::{Duration, Timer};
 use embedded_graphics::{
     mono_font::{
         ascii::{FONT_6X10, FONT_9X18_BOLD},
@@ -12,30 +13,38 @@ use embedded_graphics::{
     prelude::*,
     text::{Alignment, Text},
 };
-use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
-
-use embassy_executor::Executor;
-use embassy_time::{Duration, Timer};
+use esp_backtrace as _;
+use esp_println::println;
+use hal::dma::DmaPriority;
+use hal::spi::master::dma::SpiDma;
 use hal::{
     clock::ClockControl,
     embassy,
-    gpio::IO,
+    gpio::{AnyPin, Output, PushPull, IO},
     i2c::I2C,
-    peripherals::{I2C0, Peripherals},
+    interrupt, pdma,
+    peripherals::{Interrupt, Peripherals, I2C0, SPI2},
     prelude::*,
+    spi::{master::Spi, FullDuplexMode, SpiMode},
     timer::TimerGroup,
-    Rtc,
+    Delay,
 };
-use esp_backtrace as _;
+use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
+
 use static_cell::StaticCell;
 
 #[embassy_executor::task]
-async fn handle_display(i2c: I2C<'static, I2C0>) {
+async fn handle_display(
+    i2c: I2C<'static, I2C0>,
+    mut reset: AnyPin<Output<PushPull>>,
+    mut delay: Delay,
+) {
     let iface = I2CDisplayInterface::new(i2c);
     println!("Starting display loop!");
 
     let mut display = Ssd1306::new(iface, DisplaySize128x64, DisplayRotation::Rotate0)
         .into_buffered_graphics_mode();
+    display.reset(&mut reset, &mut delay).unwrap();
     display.init().unwrap();
 
     let text_style = MonoTextStyleBuilder::new()
@@ -71,7 +80,7 @@ async fn handle_display(i2c: I2C<'static, I2C0>) {
         // Write buffer to display
         display.flush().unwrap();
         // Clear display buffer
-        display.clear();
+        display.clear(BinaryColor::Off).unwrap();
 
         Timer::after(Duration::from_millis(3_000)).await;
 
@@ -87,64 +96,109 @@ async fn handle_display(i2c: I2C<'static, I2C0>) {
         // Write buffer to display
         display.flush().unwrap();
         // Clear display buffer
-        display.clear();
+        display.clear(BinaryColor::Off).unwrap();
 
         Timer::after(Duration::from_millis(3_000)).await;
     }
 }
 
+/*
 #[embassy_executor::task]
-async fn run2() {
+async fn run2(spi: SpiDma<'static, SPI2, FullDuplexMode>) {
+    let send_buffer = [0, 1, 2, 3, 4, 5, 6, 7];
     loop {
-        esp_println::println!("task: 2!");
+        let mut buffer = [0; 8];
+        esp_println::println!("Sending bytes");
+        embedded_hal_async::spi::SpiBus::transfer(&mut spi, &mut buffer, &send_buffer)
+            .await
+            .unwrap();
+        esp_println::println!("Bytes recieved: {:?}", buffer);
         Timer::after(Duration::from_millis(5_000)).await;
     }
 }
+*/
 
 static EXECUTOR: StaticCell<Executor> = StaticCell::new();
 
 #[entry]
 fn main() -> ! {
     esp_println::println!("Init!");
+
     let peripherals = Peripherals::take();
-    let mut system = peripherals.DPORT.split();
+    let system = peripherals.SYSTEM.split();
     let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
 
-    let mut rtc = Rtc::new(peripherals.RTC_CNTL);
-    let timer_group0 = TimerGroup::new(
-        peripherals.TIMG0,
-        &clocks,
-        &mut system.peripheral_clock_control,
-    );
-    let mut wdt0 = timer_group0.wdt;
-    let timer_group1 = TimerGroup::new(
-        peripherals.TIMG1,
-        &clocks,
-        &mut system.peripheral_clock_control,
-    );
-    let mut wdt1 = timer_group1.wdt;
-
-    // Disable watchdog timers
-    rtc.rwdt.disable();
-    wdt0.disable();
-    wdt1.disable();
-
+    let timer_group0 = TimerGroup::new(peripherals.TIMG0, &clocks);
     embassy::init(&clocks, timer_group0.timer0);
-
-    // Initialize IO
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
+
+    // Initialize I2C for display
     let i2c = I2C::new(
         peripherals.I2C0,
         io.pins.gpio4,
         io.pins.gpio15,
         100u32.kHz(),
-        &mut system.peripheral_clock_control,
         &clocks,
     );
 
+    let oled_rst = io.pins.gpio16.into_push_pull_output();
+    let oled_dly = Delay::new(&clocks);
+
+    let dma = pdma::Dma::new(system.dma);
+    let dma_channel = dma.spi2channel;
+
+    let mut descriptors = [0u32; 8 * 3];
+    let mut rx_descriptors = [0u32; 8 * 3];
+
+    // Initialize SPI for LoRa
+    /*
+     * #define SCK 5
+     * #define MISO 19
+     * #define MOSI 27
+     * #define SS 18
+     * #define RST 14
+     * #define DIO0 26
+     */
+    let mut spi = Spi::new(
+        peripherals.SPI2,
+        io.pins.gpio5,  // sck
+        io.pins.gpio27, // mosi
+        io.pins.gpio19, // miso
+        io.pins.gpio18, // ss
+        100u32.kHz(),
+        SpiMode::Mode0,
+        &clocks,
+    )
+    .with_dma(dma_channel.configure(
+        false,
+        &mut descriptors,
+        &mut rx_descriptors,
+        DmaPriority::Priority0,
+    ));
+
+    // spi.send(0x42).unwrap();
+
+    // let x:u8 = spi.read().unwrap();
+
+    // esp_println::println!("Data: {}!", x);
+
     let executor = EXECUTOR.init(Executor::new());
     executor.run(|spawner| {
-        spawner.spawn(handle_display(i2c)).ok();
-        spawner.spawn(run2()).ok();
+        spawner
+            .spawn(handle_display(i2c, oled_rst.into(), oled_dly))
+            .ok();
+        // spawner.spawn(run2(spi)).ok();
     });
+    /*
+    let send_buffer = [0, 1, 2, 3, 4, 5, 6, 7];
+    loop {
+        let mut buffer = [0; 8];
+        esp_println::println!("Sending bytes");
+        embedded_hal_async::spi::SpiBus::transfer(&mut spi, &mut buffer, &send_buffer)
+            .await
+            .unwrap();
+        esp_println::println!("Bytes recieved: {:?}", buffer);
+        Timer::after(Duration::from_millis(5_000)).await;
+    }
+    */
 }
