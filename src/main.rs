@@ -16,13 +16,13 @@ use embedded_graphics::{
 use esp_backtrace as _;
 use esp_println::println;
 use hal::dma::DmaPriority;
-use hal::spi::master::dma::SpiDma;
 use hal::{
     clock::ClockControl,
     embassy,
     gpio::{AnyPin, Output, PushPull, IO},
     i2c::I2C,
-    interrupt, pdma,
+    interrupt,
+    pdma::{self, Spi2DmaChannelCreator},
     peripherals::{Interrupt, Peripherals, I2C0, SPI2},
     prelude::*,
     spi::{master::Spi, FullDuplexMode, SpiMode},
@@ -34,11 +34,7 @@ use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 use static_cell::StaticCell;
 
 #[embassy_executor::task]
-async fn handle_display(
-    i2c: I2C<'static, I2C0>,
-    mut reset: AnyPin<Output<PushPull>>,
-    mut delay: Delay,
-) {
+async fn oled_task(i2c: I2C<'static, I2C0>, mut reset: AnyPin<Output<PushPull>>, mut delay: Delay) {
     let iface = I2CDisplayInterface::new(i2c);
     println!("Starting display loop!");
 
@@ -57,8 +53,6 @@ async fn handle_display(
         .build();
 
     loop {
-        esp_println::println!("task: display!");
-
         Text::with_alignment(
             "esp-hal",
             display.bounding_box().center() + Point::new(0, 0),
@@ -102,21 +96,30 @@ async fn handle_display(
     }
 }
 
-/*
 #[embassy_executor::task]
-async fn run2(spi: SpiDma<'static, SPI2, FullDuplexMode>) {
-    let send_buffer = [0, 1, 2, 3, 4, 5, 6, 7];
+async fn lora_task(spi: Spi<'static, SPI2, FullDuplexMode>, dma_channel: Spi2DmaChannelCreator) {
+    esp_println::println!("SPI start...");
+    let mut descriptors = [0u32; 8 * 3];
+    let mut rx_descriptors = [0u32; 8 * 3];
+    let mut bus = spi.with_dma(dma_channel.configure(
+        false,
+        &mut descriptors,
+        &mut rx_descriptors,
+        DmaPriority::Priority0,
+    ));
+
+    let send_buffer = [0x42];
     loop {
+        esp_println::println!("SPI loop...");
         let mut buffer = [0; 8];
-        esp_println::println!("Sending bytes");
-        embedded_hal_async::spi::SpiBus::transfer(&mut spi, &mut buffer, &send_buffer)
+        embedded_hal_async::spi::SpiBus::transfer(&mut bus, &mut buffer, &send_buffer)
             .await
             .unwrap();
-        esp_println::println!("Bytes recieved: {:?}", buffer);
+        esp_println::println!("task: {:?}", buffer);
+
         Timer::after(Duration::from_millis(5_000)).await;
     }
 }
-*/
 
 static EXECUTOR: StaticCell<Executor> = StaticCell::new();
 
@@ -132,6 +135,8 @@ fn main() -> ! {
     embassy::init(&clocks, timer_group0.timer0);
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
 
+    interrupt::enable(Interrupt::SPI2_DMA, interrupt::Priority::Priority1).unwrap();
+
     // Initialize I2C for display
     let i2c = I2C::new(
         peripherals.I2C0,
@@ -144,13 +149,7 @@ fn main() -> ! {
     let oled_rst = io.pins.gpio16.into_push_pull_output();
     let oled_dly = Delay::new(&clocks);
 
-    let dma = pdma::Dma::new(system.dma);
-    let dma_channel = dma.spi2channel;
-
-    let mut descriptors = [0u32; 8 * 3];
-    let mut rx_descriptors = [0u32; 8 * 3];
-
-    // Initialize SPI for LoRa
+    // Initialize SPI for LoRa chip
     /*
      * #define SCK 5
      * #define MISO 19
@@ -159,7 +158,7 @@ fn main() -> ! {
      * #define RST 14
      * #define DIO0 26
      */
-    let mut spi = Spi::new(
+    let spi = Spi::new(
         peripherals.SPI2,
         io.pins.gpio5,  // sck
         io.pins.gpio27, // mosi
@@ -168,37 +167,15 @@ fn main() -> ! {
         100u32.kHz(),
         SpiMode::Mode0,
         &clocks,
-    )
-    .with_dma(dma_channel.configure(
-        false,
-        &mut descriptors,
-        &mut rx_descriptors,
-        DmaPriority::Priority0,
-    ));
-
-    // spi.send(0x42).unwrap();
-
-    // let x:u8 = spi.read().unwrap();
-
-    // esp_println::println!("Data: {}!", x);
+    );
+    let dma = pdma::Dma::new(system.dma);
+    let dma_channel = dma.spi2channel;
 
     let executor = EXECUTOR.init(Executor::new());
     executor.run(|spawner| {
         spawner
-            .spawn(handle_display(i2c, oled_rst.into(), oled_dly))
+            .spawn(oled_task(i2c, oled_rst.into(), oled_dly))
             .ok();
-        // spawner.spawn(run2(spi)).ok();
+        spawner.spawn(lora_task(spi, dma_channel)).ok();
     });
-    /*
-    let send_buffer = [0, 1, 2, 3, 4, 5, 6, 7];
-    loop {
-        let mut buffer = [0; 8];
-        esp_println::println!("Sending bytes");
-        embedded_hal_async::spi::SpiBus::transfer(&mut spi, &mut buffer, &send_buffer)
-            .await
-            .unwrap();
-        esp_println::println!("Bytes recieved: {:?}", buffer);
-        Timer::after(Duration::from_millis(5_000)).await;
-    }
-    */
 }
