@@ -98,7 +98,7 @@ async fn oled_task(i2c: I2C<'static, I2C0>, mut reset: AnyPin<Output<PushPull>>,
 
 #[embassy_executor::task]
 async fn lora_task(spi: Spi<'static, SPI2, FullDuplexMode>, dma_channel: Spi2DmaChannelCreator) {
-    esp_println::println!("SPI start...");
+    println!("SPI start...");
     let mut descriptors = [0u32; 8 * 3];
     let mut rx_descriptors = [0u32; 8 * 3];
     let mut bus = spi.with_dma(dma_channel.configure(
@@ -110,12 +110,11 @@ async fn lora_task(spi: Spi<'static, SPI2, FullDuplexMode>, dma_channel: Spi2Dma
 
     let send_buffer = [0x42];
     loop {
-        esp_println::println!("SPI loop...");
         let mut buffer = [0; 8];
         embedded_hal_async::spi::SpiBus::transfer(&mut bus, &mut buffer, &send_buffer)
             .await
             .unwrap();
-        esp_println::println!("task: {:?}", buffer);
+        println!("task: {:#x?}", &buffer);
 
         Timer::after(Duration::from_millis(5_000)).await;
     }
@@ -125,7 +124,7 @@ static EXECUTOR: StaticCell<Executor> = StaticCell::new();
 
 #[entry]
 fn main() -> ! {
-    esp_println::println!("Init!");
+    println!("Init!");
 
     let peripherals = Peripherals::take();
     let system = peripherals.SYSTEM.split();
