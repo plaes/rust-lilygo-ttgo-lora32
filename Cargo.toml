@@ -6,15 +6,20 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
+embedded-hal = "1.0.0-rc.1"
 embedded-hal-async = "1.0.0-rc.1"
 hal = { git = "https://github.com/esp-rs/esp-hal", package = "esp32-hal", version = "0.15.0", features=["default", "async", "embassy", "embassy-time-timg0", "eh1"]}
 esp-backtrace = { version = "0.8.0", features = ["esp32", "panic-handler", "exception-handler", "print-uart"] }
 esp-println = { version = "0.6.0", features = ["esp32"] }
-
 embassy-executor = { version = "0.3.0", features = ["arch-xtensa", "executor-thread", "integrated-timers", "nightly"]}
+
 static_cell = "1.0.0"
 
-embassy-time = "0.1.4"
+embassy-time = { version = "0.1.4", features = ["defmt", "unstable-traits", "nightly"] }
 
 embedded-graphics = "0.8.1"
 ssd1306 = "0.8.3"
+lora-phy = { version = "2.1.2", features = [] }
+
+[patch.crates-io]
+lora-phy = { path = "../lora-phy"}

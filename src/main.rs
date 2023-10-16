@@ -1,9 +1,11 @@
 #![no_std]
 #![no_main]
 #![feature(type_alias_impl_trait)]
+#![feature(async_fn_in_trait)]
 
 use embassy_executor::Executor;
-use embassy_time::{Duration, Timer};
+
+use embassy_time::{Delay as EDelay, Duration, Timer};
 use embedded_graphics::{
     mono_font::{
         ascii::{FONT_6X10, FONT_9X18_BOLD},
@@ -19,7 +21,7 @@ use hal::dma::DmaPriority;
 use hal::{
     clock::ClockControl,
     embassy,
-    gpio::{AnyPin, Output, PushPull, IO},
+    gpio::{AnyPin, GpioPin, Input, Output, PushPull, IO},
     i2c::I2C,
     interrupt,
     pdma::{self, Spi2DmaChannelCreator},
@@ -32,6 +34,12 @@ use hal::{
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 
 use static_cell::StaticCell;
+
+mod lora_iface;
+use crate::lora_iface::LoRaInterfaceVariant;
+use lora_phy::mod_params::{Bandwidth, BoardType, CodingRate, ModulationParams, SpreadingFactor};
+use lora_phy::sx1276_7_8_9::SX1276_7_8_9;
+use lora_phy::LoRa;
 
 #[embassy_executor::task]
 async fn oled_task(i2c: I2C<'static, I2C0>, mut reset: AnyPin<Output<PushPull>>, mut delay: Delay) {
@@ -97,17 +105,40 @@ async fn oled_task(i2c: I2C<'static, I2C0>, mut reset: AnyPin<Output<PushPull>>,
 }
 
 #[embassy_executor::task]
-async fn lora_task(spi: Spi<'static, SPI2, FullDuplexMode>, dma_channel: Spi2DmaChannelCreator) {
+async fn lora_task(
+    spi: Spi<'static, SPI2, FullDuplexMode>,
+    dma_channel: Spi2DmaChannelCreator,
+    reset: AnyPin<Output<hal::gpio::PushPull>>,
+    dio0: GpioPin<Input<hal::gpio::PullDown>, 26>,
+) {
     println!("SPI start...");
     let mut descriptors = [0u32; 8 * 3];
     let mut rx_descriptors = [0u32; 8 * 3];
-    let mut bus = spi.with_dma(dma_channel.configure(
+    let mut spibus = spi.with_dma(dma_channel.configure(
         false,
         &mut descriptors,
         &mut rx_descriptors,
         DmaPriority::Priority0,
     ));
 
+    let iv = LoRaInterfaceVariant::new(reset, dio0).unwrap();
+    let mut lora = {
+        match LoRa::new(
+            SX1276_7_8_9::new(BoardType::GenericSx1276, spibus, iv),
+            true,
+            EDelay,
+        )
+        .await
+        {
+            Ok(l) => l,
+            Err(err) => {
+                println!("Radio error: {:#?}", err);
+                return;
+            }
+        }
+    };
+
+    /*
     let send_buffer = [0x42];
     loop {
         let mut buffer = [0; 8];
@@ -118,6 +149,7 @@ async fn lora_task(spi: Spi<'static, SPI2, FullDuplexMode>, dma_channel: Spi2Dma
 
         Timer::after(Duration::from_millis(5_000)).await;
     }
+    */
 }
 
 static EXECUTOR: StaticCell<Executor> = StaticCell::new();
@@ -157,6 +189,9 @@ fn main() -> ! {
      * #define RST 14
      * #define DIO0 26
      */
+    // let lora_nss = io.pins.gpio18.into_push_pull_output();
+    let lora_rst = io.pins.gpio14.into_push_pull_output();
+    let lora_di0 = io.pins.gpio26.into_pull_down_input();
     let spi = Spi::new(
         peripherals.SPI2,
         io.pins.gpio5,  // sck
@@ -175,6 +210,8 @@ fn main() -> ! {
         spawner
             .spawn(oled_task(i2c, oled_rst.into(), oled_dly))
             .ok();
-        spawner.spawn(lora_task(spi, dma_channel)).ok();
+        spawner
+            .spawn(lora_task(spi, dma_channel, lora_rst.into(), lora_di0))
+            .ok();
     });
 }
