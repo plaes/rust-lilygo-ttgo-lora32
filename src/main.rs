@@ -82,7 +82,12 @@ async fn main(spawner: Spawner) {
     defmt::debug!("Init i2c!");
     let iface = I2CDisplayInterface::new(i2c0);
     let oled_reset = io.pins.gpio16;
-    spawner.spawn(oled_task(iface, AnyPin::new(oled_reset))).ok();
+    spawner
+        .spawn(oled_task(iface, AnyPin::new(oled_reset)))
+        .ok();
+
+    let prg_button = io.pins.gpio0;
+    spawner.spawn(button_detect(AnyPin::new(prg_button))).ok();
 
     let blue_led = io.pins.gpio2;
     spawner.spawn(led_blinker(AnyPin::new(blue_led))).ok();
@@ -198,9 +203,7 @@ async fn main(spawner: Spawner) {
 }
 
 #[embassy_executor::task]
-async fn led_blinker(
-    pin: AnyPin<'static>,
-) {
+async fn led_blinker(pin: AnyPin<'static>) {
     let mut led = Output::new(pin, Level::High);
 
     loop {
@@ -209,12 +212,22 @@ async fn led_blinker(
     }
 }
 
+#[embassy_executor::task]
+async fn button_detect(pin: AnyPin<'static>) {
+    let mut button = Input::new(pin, Pull::Down);
+
+    loop {
+        button.wait_for_any_edge().await;
+        if button.is_high() {
+            defmt::info!("Button pressed!");
+        } else {
+            defmt::info!("Button released!");
+        }
+    }
+}
 
 #[embassy_executor::task]
-async fn oled_task(
-    iface: OledIface,
-    reset: AnyPin<'static>,
-) {
+async fn oled_task(iface: OledIface, reset: AnyPin<'static>) {
     defmt::debug!("DISPLAY INIT!");
 
     let mut display = Ssd1306::new(iface, DisplaySize128x64, DisplayRotation::Rotate0)
