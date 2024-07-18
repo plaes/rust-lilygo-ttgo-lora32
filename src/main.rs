@@ -12,7 +12,7 @@ use esp_hal::{
     clock::ClockControl,
     dma::{Dma, DmaPriority},
     dma_descriptors,
-    gpio::{GpioPin, Input, Io, Level, Output, Pull, NO_PIN},
+    gpio::{any_pin::AnyPin, Input, Io, Level, Output, Pull, NO_PIN},
     i2c::I2C,
     peripherals::{Peripherals, I2C0},
     prelude::*,
@@ -81,11 +81,13 @@ async fn main(spawner: Spawner) {
 
     defmt::debug!("Init i2c!");
     let iface = I2CDisplayInterface::new(i2c0);
-    let oled_reset = Output::new(io.pins.gpio16, Level::Low);
-    spawner.spawn(oled_task(iface, oled_reset)).ok();
+    let oled_reset = io.pins.gpio16;
+    spawner.spawn(oled_task(iface, AnyPin::new(oled_reset))).ok();
+
+    let blue_led = io.pins.gpio2;
+    spawner.spawn(led_blinker(AnyPin::new(blue_led))).ok();
 
     // Init SPI and LoRa
-
     let dma = Dma::new(peripherals.DMA);
     let dma_channel = dma.spi2channel;
 
@@ -196,15 +198,29 @@ async fn main(spawner: Spawner) {
 }
 
 #[embassy_executor::task]
+async fn led_blinker(
+    pin: AnyPin<'static>,
+) {
+    let mut led = Output::new(pin, Level::High);
+
+    loop {
+        Timer::after(Duration::from_millis(500)).await;
+        led.toggle();
+    }
+}
+
+
+#[embassy_executor::task]
 async fn oled_task(
     iface: OledIface,
-    // TODO: Figure out how to pass generic "anypin"
-    mut reset: Output<'static, GpioPin<16>>,
+    reset: AnyPin<'static>,
 ) {
     defmt::debug!("DISPLAY INIT!");
 
     let mut display = Ssd1306::new(iface, DisplaySize128x64, DisplayRotation::Rotate0)
         .into_buffered_graphics_mode();
+
+    let mut reset = Output::new(reset, Level::Low);
 
     // For some reason, this board really needs reset..
     display.reset(&mut reset, &mut Delay).unwrap();
