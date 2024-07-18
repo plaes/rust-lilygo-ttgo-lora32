@@ -1,5 +1,5 @@
 [target.xtensa-esp32-none-elf]
-runner = "espflash flash --monitor --log-format defmt"
+runner = "espflash flash --no-stub --monitor --log-format defmt"
 
 [build]
 rustflags = [
@@ -14,4 +14,4 @@ target = "xtensa-esp32-none-elf"
 build-std = ["core"]
 
 [env]
-DEFMT_LOG="info"
+DEFMT_LOG="debug"
