@@ -10,18 +10,19 @@ use esp_println as _;
 
 use esp_hal::{
     clock::ClockControl,
-    dma::{Dma, DmaPriority},
+    dma::{Dma, DmaPriority, Spi2DmaChannel},
     dma_descriptors,
-    gpio::{any_pin::AnyPin, Input, Io, Level, Output, Pull, NO_PIN},
+    gpio::{any_pin::AnyPin, GpioPin, Input, Io, Level, Output, Pull, NO_PIN},
     i2c::I2C,
     peripherals::{Peripherals, I2C0},
     prelude::*,
     spi::{
-        master::{prelude::*, Spi},
-        SpiMode,
+        master::{dma::SpiDma, prelude::*, Spi},
+        FullDuplexMode, SpiMode,
     },
     system::SystemControl,
     timer::{timg::TimerGroup, ErasedTimer, OneShotTimer},
+    Async, FlashSafeDma,
 };
 
 use embedded_graphics::{
@@ -48,10 +49,19 @@ macro_rules! mk_static {
     }};
 }
 
-const MAX_TX_POWER: i32 = 14;
 const LORA_FREQUENCY_IN_HZ: u32 = 868_100_000;
+const DMA_BUF: usize = 256;
 
-type OledIface = I2CInterface<I2C<'static, I2C0, esp_hal::Async>>;
+type OledIface = I2CInterface<I2C<'static, I2C0, Async>>;
+
+type SafeSpiDma = FlashSafeDma<
+    SpiDma<'static, esp_hal::peripherals::SPI2, Spi2DmaChannel, FullDuplexMode, Async>,
+    DMA_BUF,
+>;
+
+// TODO: Figure out AnyPin
+type SxIfaceVariant =
+    GenericSx127xInterfaceVariant<Output<'static, GpioPin<22>>, Input<'static, GpioPin<26>>>;
 
 #[main]
 async fn main(spawner: Spawner) {
@@ -61,7 +71,7 @@ async fn main(spawner: Spawner) {
     let system = SystemControl::new(peripherals.SYSTEM);
     let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
 
-    let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks, None);
+    let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks);
     let timer0 = OneShotTimer::new(timg0.timer0.into());
     let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], [timer0]);
 
@@ -113,7 +123,7 @@ async fn main(spawner: Spawner) {
             rx_descriptors,
         );
 
-    let spi = esp_hal::FlashSafeDma::<_, 256>::new(spi);
+    let spi: SafeSpiDma = FlashSafeDma::new(spi);
 
     let spi_dev = ExclusiveDevice::new(spi, cs, Delay).unwrap();
 
@@ -129,76 +139,18 @@ async fn main(spawner: Spawner) {
     };
 
     defmt::info!("Initializing LoRa");
-    let mut lora = {
+    let lora = {
         match LoRa::new(Sx127x::new(spi_dev, iv, config), true, Delay).await {
             Ok(r) => r,
             Err(r) => panic!("Fail: {:?}", r),
         }
     };
 
-    defmt::info!("Initializing modulation parameters");
-
-    let mdltn_params = {
-        match lora.create_modulation_params(
-            SpreadingFactor::_10,
-            Bandwidth::_250KHz,
-            CodingRate::_4_8,
-            LORA_FREQUENCY_IN_HZ,
-        ) {
-            Ok(mp) => mp,
-            Err(err) => {
-                defmt::info!("Radio error = {}", err);
-                return;
-            }
-        }
-    };
-
-    defmt::info!("Initializing packet parameters");
-    let mut tx_pkt_params = {
-        match lora.create_tx_packet_params(4, false, true, false, &mdltn_params) {
-            Ok(pp) => pp,
-            Err(err) => {
-                defmt::info!("Radio error = {}", err);
-                return;
-            }
-        }
-    };
-
-    defmt::info!("Sleeping!");
-    match lora.sleep(false).await {
-        Ok(()) => defmt::info!("Sleep successful"),
-        Err(err) => defmt::info!("Sleep unsuccessful = {}", err),
-    }
-
-    let send = [1, 2, 3, 4];
+    spawner.spawn(lora_handler(lora)).ok();
 
     loop {
         defmt::info!("MAIN LOOP!");
         Timer::after(Duration::from_millis(5_000)).await;
-
-        defmt::info!("Preparing radio!");
-        match lora
-            .prepare_for_tx(&mdltn_params, &mut tx_pkt_params, MAX_TX_POWER, &send)
-            .await
-        {
-            Ok(()) => {
-                defmt::info!("Radio prepared!");
-            }
-            Err(err) => {
-                defmt::info!("Radio error = {}", err);
-                return;
-            }
-        };
-
-        match lora.tx().await {
-            Ok(()) => {
-                defmt::info!("TX DONE");
-            }
-            Err(err) => {
-                defmt::info!("Radio error = {}", err);
-                return;
-            }
-        };
     }
 }
 
@@ -276,8 +228,15 @@ async fn oled_task(iface: OledIface, reset: AnyPin<'static>) {
 
         Timer::after(Duration::from_millis(3_000)).await;
 
+        let _text = "Transmit!";
+
+        #[cfg(feature="receiver")]
+        let _text = "Receive!";
+
+        let text = _text;
+
         Text::with_alignment(
-            "Demo!",
+            text,
             display.bounding_box().center(),
             text_style_big,
             Alignment::Center,
@@ -289,5 +248,153 @@ async fn oled_task(iface: OledIface, reset: AnyPin<'static>) {
         display.clear(BinaryColor::Off).unwrap();
 
         Timer::after(Duration::from_millis(3_000)).await;
+    }
+}
+
+#[cfg(feature = "receiver")]
+#[embassy_executor::task]
+async fn lora_handler(
+    mut lora: LoRa<
+        Sx127x<
+            ExclusiveDevice<SafeSpiDma, Output<'static, GpioPin<18>>, embassy_time::Delay>,
+            SxIfaceVariant,
+            Sx1276,
+        >,
+        Delay,
+    >,
+) {
+    const RX_BUF_LEN: u8 = 255;
+
+    defmt::info!("Initializing modulation parameters");
+
+    let mdltn_params = {
+        match lora.create_modulation_params(
+            SpreadingFactor::_10,
+            Bandwidth::_250KHz,
+            CodingRate::_4_8,
+            LORA_FREQUENCY_IN_HZ,
+        ) {
+            Ok(mp) => mp,
+            Err(err) => {
+                defmt::info!("Radio error = {}", err);
+                return;
+            }
+        }
+    };
+
+    let rx_pkt_params = {
+        match lora.create_rx_packet_params(4, false, RX_BUF_LEN, true, false, &mdltn_params) {
+            Ok(pp) => pp,
+            Err(err) => {
+                defmt::info!("Radio error: {}", err);
+                return;
+            }
+        }
+    };
+
+    defmt::info!("Sleeping!");
+    match lora.sleep(false).await {
+        Ok(()) => defmt::info!("Sleep successful"),
+        Err(err) => defmt::info!("Sleep unsuccessful = {}", err),
+    }
+
+    match lora
+        .prepare_for_rx(lora_phy::RxMode::Continuous, &mdltn_params, &rx_pkt_params)
+        .await
+    {
+        Ok(()) => {}
+        Err(err) => {
+            defmt::info!("Radio error = {}", err);
+            return;
+        }
+    };
+
+    loop {
+        defmt::info!("RX LOOP!");
+
+        let mut receiving_buffer = [0u8; RX_BUF_LEN as usize];
+        match lora.rx(&rx_pkt_params, &mut receiving_buffer).await {
+            Ok((len, status)) => {
+                defmt::info!(
+                    "rx successful (got {} bytes): {:?}",
+                    len,
+                    receiving_buffer[0..len as usize]
+                );
+                defmt::info!("RSSI: {}, SNR: {}", status.rssi, status.snr);
+            }
+            Err(err) => defmt::info!("rx unsuccessful = {}", err),
+        }
+        Timer::after(Duration::from_millis(1_000)).await;
+    }
+}
+
+#[cfg(not(feature = "receiver"))]
+#[embassy_executor::task]
+async fn lora_handler(
+    mut lora: LoRa<
+        Sx127x<
+            ExclusiveDevice<SafeSpiDma, Output<'static, GpioPin<18>>, embassy_time::Delay>,
+            SxIfaceVariant,
+            Sx1276,
+        >,
+        Delay,
+    >,
+) {
+    const MAX_TX_POWER: i32 = 14;
+
+    let mdltn_params = {
+        match lora.create_modulation_params(
+            SpreadingFactor::_10,
+            Bandwidth::_250KHz,
+            CodingRate::_4_8,
+            LORA_FREQUENCY_IN_HZ,
+        ) {
+            Ok(mp) => mp,
+            Err(err) => {
+                defmt::info!("Radio error = {}", err);
+                return;
+            }
+        }
+    };
+
+    defmt::info!("Initializing packet parameters");
+    let mut tx_pkt_params = {
+        match lora.create_tx_packet_params(4, false, true, false, &mdltn_params) {
+            Ok(pp) => pp,
+            Err(err) => {
+                defmt::info!("Radio error = {}", err);
+                return;
+            }
+        }
+    };
+    loop {
+        // NB! Seems like transfers of 3, 5, 6 and 8 bytes fail
+        // https://github.com/esp-rs/esp-hal/issues/1798
+        let send = [4, 3, 2, 1];
+
+        defmt::info!("Preparing radio!");
+        match lora
+            .prepare_for_tx(&mdltn_params, &mut tx_pkt_params, MAX_TX_POWER, &send)
+            .await
+        {
+            Ok(()) => {
+                defmt::info!("Radio prepared!");
+            }
+            Err(err) => {
+                defmt::info!("Radio error = {}", err);
+                return;
+            }
+        };
+
+        match lora.tx().await {
+            Ok(()) => {
+                defmt::info!("TX DONE");
+            }
+            Err(err) => {
+                defmt::info!("Radio error = {}", err);
+                return;
+            }
+        };
+        Timer::after(Duration::from_millis(5_000)).await;
     }
 }

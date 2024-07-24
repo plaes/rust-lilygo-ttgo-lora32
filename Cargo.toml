@@ -9,11 +9,11 @@ license = "MIT"
 embedded-hal = "1"
 embedded-hal-async = "1"
 
-#esp-hal = { path = "../esp-hal/esp-hal", features=["default", "esp32", "defmt", "async", "embedded-hal"]}
-esp-hal = { git = "https://github.com/esp-rs/esp-hal", branch = "main", features=["default", "esp32", "defmt", "async", "embedded-hal"]}
+esp-hal = { path = "../esp-hal/esp-hal", features=["default", "esp32", "defmt", "async", "embedded-hal"]}
+#esp-hal = { git = "https://github.com/esp-rs/esp-hal", branch = "main", features=["default", "esp32", "defmt", "async", "embedded-hal"]}
 # TODO: No release for 0.18.0
-#esp-hal-embassy = { path = "../esp-hal/esp-hal-embassy", features=["esp32", "defmt", "integrated-timers"]}
-esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal", branch = "main", features=["esp32", "defmt", "integrated-timers"]}
+esp-hal-embassy = { path = "../esp-hal/esp-hal-embassy", features=["esp32", "defmt", "integrated-timers"]}
+#esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal", branch = "main", features=["esp32", "defmt", "integrated-timers"]}
 
 esp-backtrace = { version = "0.12.1", features = ["esp32", "defmt", "panic-handler", "exception-handler"] }
 esp-println = { version = "0.9.1", features = ["defmt-espflash", "esp32"] }
@@ -35,3 +35,15 @@ lora-phy = { path = "../lora-rs/lora-phy"}
 #esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal", tag = "v0.18.0" }
 #embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "64ab23d17d9addd82f0b11a27a3d2219c1a8ec20" }
 #embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy", rev = "64ab23d17d9addd82f0b11a27a3d2219c1a8ec20" }
+
+[features]
+receiver = []
+
+[[bin]]
+name = "transmitter"
+path = "src/main.rs"
+
+[[bin]]
+name = "receiver"
+path = "src/main.rs"
+required-features = ["receiver"]
