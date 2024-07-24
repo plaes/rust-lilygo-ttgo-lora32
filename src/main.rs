@@ -2,6 +2,8 @@
 #![no_main]
 
 use embassy_executor::Spawner;
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_time::{Delay, Duration, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 
@@ -27,7 +29,7 @@ use esp_hal::{
 
 use embedded_graphics::{
     mono_font::{
-        ascii::{FONT_6X10, FONT_9X18_BOLD},
+        ascii::{FONT_5X8, FONT_9X18_BOLD},
         MonoTextStyleBuilder,
     },
     pixelcolor::BinaryColor,
@@ -42,14 +44,30 @@ use lora_phy::LoRa;
 
 use lora_phy::mod_params::{Bandwidth, CodingRate, SpreadingFactor};
 
+use static_cell::StaticCell;
+
+use hex_display::HexDisplayExt;
+
+const RX_BUF_LEN: u8 = 255;
+
+struct Message {
+    len: usize,
+    buf: [u8; RX_BUF_LEN as usize],
+    rssi: i16,
+    snr: i16,
+}
+
+static CHANNEL: StaticCell<Channel<NoopRawMutex, Message, 1>> = StaticCell::new();
+
 macro_rules! mk_static {
     ($t:ty,$val:expr) => {{
-        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+        static STATIC_CELL: StaticCell<$t> = StaticCell::new();
         STATIC_CELL.uninit().write(($val))
     }};
 }
 
 const LORA_FREQUENCY_IN_HZ: u32 = 868_100_000;
+const LORA_BANDWIDTH: Bandwidth = Bandwidth::_250KHz;
 const DMA_BUF: usize = 256;
 
 type OledIface = I2CInterface<I2C<'static, I2C0, Async>>;
@@ -66,6 +84,8 @@ type SxIfaceVariant =
 #[main]
 async fn main(spawner: Spawner) {
     defmt::debug!("Init!");
+
+    let channel = CHANNEL.init(Channel::new());
 
     let peripherals = Peripherals::take();
     let system = SystemControl::new(peripherals.SYSTEM);
@@ -93,7 +113,11 @@ async fn main(spawner: Spawner) {
     let iface = I2CDisplayInterface::new(i2c0);
     let oled_reset = io.pins.gpio16;
     spawner
-        .spawn(oled_task(iface, AnyPin::new(oled_reset)))
+        .spawn(oled_task(
+            iface,
+            AnyPin::new(oled_reset),
+            channel.receiver(),
+        ))
         .ok();
 
     let prg_button = io.pins.gpio0;
@@ -146,7 +170,7 @@ async fn main(spawner: Spawner) {
         }
     };
 
-    spawner.spawn(lora_handler(lora)).ok();
+    spawner.spawn(lora_handler(lora, channel.sender())).ok();
 
     loop {
         defmt::info!("MAIN LOOP!");
@@ -179,7 +203,11 @@ async fn button_detect(pin: AnyPin<'static>) {
 }
 
 #[embassy_executor::task]
-async fn oled_task(iface: OledIface, reset: AnyPin<'static>) {
+async fn oled_task(
+    iface: OledIface,
+    reset: AnyPin<'static>,
+    channel: Receiver<'static, NoopRawMutex, Message, 1>,
+) {
     defmt::debug!("DISPLAY INIT!");
 
     let mut display = Ssd1306::new(iface, DisplaySize128x64, DisplayRotation::Rotate0)
@@ -194,7 +222,7 @@ async fn oled_task(iface: OledIface, reset: AnyPin<'static>) {
 
     // Specify different text styles
     let text_style = MonoTextStyleBuilder::new()
-        .font(&FONT_6X10)
+        .font(&FONT_5X8)
         .text_color(BinaryColor::On)
         .build();
     let text_style_big = MonoTextStyleBuilder::new()
@@ -202,8 +230,9 @@ async fn oled_task(iface: OledIface, reset: AnyPin<'static>) {
         .text_color(BinaryColor::On)
         .build();
 
+    #[cfg(not(feature = "receiver"))]
     loop {
-        defmt::info!("OLED LOOP!");
+        defmt::info!("TX LOOP!");
 
         Text::with_alignment(
             "esp-hal",
@@ -228,12 +257,7 @@ async fn oled_task(iface: OledIface, reset: AnyPin<'static>) {
 
         Timer::after(Duration::from_millis(3_000)).await;
 
-        let _text = "Transmit!";
-
-        #[cfg(feature="receiver")]
-        let _text = "Receive!";
-
-        let text = _text;
+        let text = "Transmit!";
 
         Text::with_alignment(
             text,
@@ -249,6 +273,83 @@ async fn oled_task(iface: OledIface, reset: AnyPin<'static>) {
 
         Timer::after(Duration::from_millis(3_000)).await;
     }
+
+    #[cfg(feature = "receiver")]
+    {
+        Text::new("ESP32 sx1276 LoRa P2P RX!", Point::new(0, 10), text_style)
+            .draw(&mut display)
+            .unwrap();
+
+        display.flush().unwrap();
+    }
+
+    #[cfg(feature = "receiver")]
+    loop {
+        use no_std_strings::{str256, str64, str_format};
+
+        let data = channel.receive().await;
+
+        display.clear(BinaryColor::Off).unwrap();
+        Text::new("ESP32 sx1276 LoRa P2P RX!", Point::new(0, 9), text_style)
+            .draw(&mut display)
+            .unwrap();
+
+        Text::new(
+            &str_format!(
+                str64,
+                // TODO: SpreadingFactor, CodingRate ??
+                "F: {}Hz, BW: {:?}",
+                LORA_FREQUENCY_IN_HZ as f64 / 1_000_000.0,
+                LORA_BANDWIDTH,
+            ),
+            Point::new(0, 18),
+            text_style,
+        )
+        .draw(&mut display)
+        .unwrap();
+
+        Text::new(
+            &str_format!(str64, "RSSI/SNR: {}/{}, data:", data.rssi, data.snr),
+            Point::new(0, 28),
+            text_style,
+        )
+        .draw(&mut display)
+        .unwrap();
+
+        // Format packet into chunks (we can only fit 12 bytes on a row)
+        let mut row = 0;
+        const ROW_LEN: usize = 12;
+        for chunk in data.buf.chunks(ROW_LEN) {
+            if row > 3 {
+                // TODO: Num bytes rx? Data overflow notification?
+                break;
+            }
+
+            // Make sure we only take as much as packet contains...
+            if ((1 + row) * ROW_LEN) > data.len {
+                Text::new(
+                    &str_format!(str256, "{}", &data.buf[(row * ROW_LEN)..data.len].hex()),
+                    Point::new(2, (36 + (row * 9)).try_into().unwrap()),
+                    text_style,
+                )
+                .draw(&mut display)
+                .unwrap();
+                break;
+            } else {
+                Text::new(
+                    &str_format!(str256, "{}", chunk.hex()),
+                    Point::new(2, (36 + (row * 9)).try_into().unwrap()),
+                    text_style,
+                )
+                .draw(&mut display)
+                .unwrap();
+            }
+
+            row += 1;
+        }
+
+        display.flush().unwrap();
+    }
 }
 
 #[cfg(feature = "receiver")]
@@ -262,15 +363,14 @@ async fn lora_handler(
         >,
         Delay,
     >,
+    channel: Sender<'static, NoopRawMutex, Message, 1>,
 ) {
-    const RX_BUF_LEN: u8 = 255;
-
     defmt::info!("Initializing modulation parameters");
 
     let mdltn_params = {
         match lora.create_modulation_params(
             SpreadingFactor::_10,
-            Bandwidth::_250KHz,
+            LORA_BANDWIDTH,
             CodingRate::_4_8,
             LORA_FREQUENCY_IN_HZ,
         ) {
@@ -312,13 +412,30 @@ async fn lora_handler(
     loop {
         defmt::info!("RX LOOP!");
 
-        let mut receiving_buffer = [0u8; RX_BUF_LEN as usize];
-        match lora.rx(&rx_pkt_params, &mut receiving_buffer).await {
+        let mut rx_buf = [0u8; RX_BUF_LEN as usize];
+        match lora.rx(&rx_pkt_params, &mut rx_buf).await {
             Ok((len, status)) => {
+                let mut buf = [0; RX_BUF_LEN as usize];
+                buf.copy_from_slice(&rx_buf);
+                /*
+                let mut buf = [
+                    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6,
+                    7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+                ];
+                */
+                let msg = Message {
+                    len: len.into(),
+                    buf,
+                    rssi: status.rssi,
+                    snr: status.snr,
+                };
+
+                channel.send(msg).await;
+
                 defmt::info!(
                     "rx successful (got {} bytes): {:?}",
                     len,
-                    receiving_buffer[0..len as usize]
+                    rx_buf[0..len as usize]
                 );
                 defmt::info!("RSSI: {}, SNR: {}", status.rssi, status.snr);
             }
@@ -339,13 +456,14 @@ async fn lora_handler(
         >,
         Delay,
     >,
+    channel: Sender<'static, NoopRawMutex, Message, 1>,
 ) {
     const MAX_TX_POWER: i32 = 14;
 
     let mdltn_params = {
         match lora.create_modulation_params(
             SpreadingFactor::_10,
-            Bandwidth::_250KHz,
+            LORA_BANDWIDTH,
             CodingRate::_4_8,
             LORA_FREQUENCY_IN_HZ,
         ) {
