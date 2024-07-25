@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+use core::fmt::{Display, Formatter};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
@@ -66,8 +67,49 @@ macro_rules! mk_static {
     }};
 }
 
+struct LoRaBw(Bandwidth);
+impl Display for LoRaBw {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        let m = match self.0 {
+            Bandwidth::_7KHz => 7,
+            Bandwidth::_10KHz => 10,
+            Bandwidth::_15KHz => 15,
+            Bandwidth::_20KHz => 20,
+            Bandwidth::_31KHz => 31,
+            Bandwidth::_41KHz => 41,
+            Bandwidth::_62KHz => 62,
+            Bandwidth::_125KHz => 125,
+            Bandwidth::_250KHz => 250,
+            Bandwidth::_500KHz => 500,
+        };
+        write!(f, "{}KHz", m)
+    }
+}
+
+struct LoRaCr(CodingRate);
+impl Display for LoRaCr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        let m = match self.0 {
+            CodingRate::_4_5 => "4/5",
+            CodingRate::_4_6 => "4/6",
+            CodingRate::_4_7 => "4/7",
+            CodingRate::_4_8 => "4/8",
+        };
+        write!(f, "{}", m)
+    }
+}
+
+struct LoRaSf(SpreadingFactor);
+impl Display for LoRaSf {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0.factor())
+    }
+}
+
+const LORA_BW: LoRaBw = LoRaBw(Bandwidth::_250KHz);
+const LORA_SF: LoRaSf = LoRaSf(SpreadingFactor::_10);
+const LORA_CR: LoRaCr = LoRaCr(CodingRate::_4_8);
 const LORA_FREQUENCY_IN_HZ: u32 = 868_100_000;
-const LORA_BANDWIDTH: Bandwidth = Bandwidth::_250KHz;
 const DMA_BUF: usize = 256;
 
 type OledIface = I2CInterface<I2C<'static, I2C0, Async>>;
@@ -230,21 +272,46 @@ async fn oled_task(
         .text_color(BinaryColor::On)
         .build();
 
+    // Show banner
+    Text::with_alignment(
+        "esp-hal",
+        display.bounding_box().center() + Point::new(0, -14),
+        text_style_big,
+        Alignment::Center,
+    )
+    .draw(&mut display)
+    .unwrap();
+
+    Text::with_alignment(
+        "Chip: ESP32 + SX1276",
+        display.bounding_box().center() + Point::new(0, 0),
+        text_style,
+        Alignment::Center,
+    )
+    .draw(&mut display)
+    .unwrap();
+
     #[cfg(not(feature = "receiver"))]
     loop {
-        defmt::info!("TX LOOP!");
+        defmt::info!("main loop!");
 
         Text::with_alignment(
-            "esp-hal",
-            display.bounding_box().center() + Point::new(0, 0),
-            text_style_big,
+            "LoRa P2P TX!",
+            display.bounding_box().center() + Point::new(0, 14),
+            text_style,
             Alignment::Center,
         )
         .draw(&mut display)
         .unwrap();
+        display.flush().unwrap();
 
+        Timer::after(Duration::from_millis(3_000)).await;
+    }
+
+    #[cfg(feature = "receiver")]
+    {
         Text::with_alignment(
-            "Chip: ESP32",
+            "LoRa P2P RX!",
             display.bounding_box().center() + Point::new(0, 14),
             text_style,
             Alignment::Center,
@@ -253,102 +320,73 @@ async fn oled_task(
         .unwrap();
 
         display.flush().unwrap();
-        display.clear(BinaryColor::Off).unwrap();
 
-        Timer::after(Duration::from_millis(3_000)).await;
+        Timer::after(Duration::from_millis(1_000)).await;
 
-        let text = "Transmit!";
+        loop {
+            use no_std_strings::{str256, str64, str_format};
 
-        Text::with_alignment(
-            text,
-            display.bounding_box().center(),
-            text_style_big,
-            Alignment::Center,
-        )
-        .draw(&mut display)
-        .unwrap();
+            let data = channel.receive().await;
 
-        display.flush().unwrap();
-        display.clear(BinaryColor::Off).unwrap();
+            display.clear(BinaryColor::Off).unwrap();
 
-        Timer::after(Duration::from_millis(3_000)).await;
-    }
-
-    #[cfg(feature = "receiver")]
-    {
-        Text::new("ESP32 sx1276 LoRa P2P RX!", Point::new(0, 10), text_style)
+            Text::new(
+                &str_format!(
+                    str64,
+                    "F: {}MHz\nBW{}, CR{}, SF{}",
+                    LORA_FREQUENCY_IN_HZ as f64 / 1_000_000.0,
+                    LORA_BW,
+                    LORA_CR,
+                    LORA_SF,
+                ),
+                Point::new(0, 8),
+                text_style,
+            )
             .draw(&mut display)
             .unwrap();
 
-        display.flush().unwrap();
-    }
-
-    #[cfg(feature = "receiver")]
-    loop {
-        use no_std_strings::{str256, str64, str_format};
-
-        let data = channel.receive().await;
-
-        display.clear(BinaryColor::Off).unwrap();
-        Text::new("ESP32 sx1276 LoRa P2P RX!", Point::new(0, 9), text_style)
+            Text::new(
+                &str_format!(str64, "RSSI/SNR: {}/{}, data:", data.rssi, data.snr),
+                Point::new(0, 28),
+                text_style,
+            )
             .draw(&mut display)
             .unwrap();
 
-        Text::new(
-            &str_format!(
-                str64,
-                // TODO: SpreadingFactor, CodingRate ??
-                "F: {}Hz, BW: {:?}",
-                LORA_FREQUENCY_IN_HZ as f64 / 1_000_000.0,
-                LORA_BANDWIDTH,
-            ),
-            Point::new(0, 18),
-            text_style,
-        )
-        .draw(&mut display)
-        .unwrap();
+            // Format packet into chunks (we can only fit 12 bytes on a row)
+            let mut row = 0;
+            const ROW_LEN: usize = 12;
+            for chunk in data.buf.chunks(ROW_LEN) {
+                if row > 3 {
+                    // TODO: Num bytes rx? Data overflow notification?
+                    break;
+                }
 
-        Text::new(
-            &str_format!(str64, "RSSI/SNR: {}/{}, data:", data.rssi, data.snr),
-            Point::new(0, 28),
-            text_style,
-        )
-        .draw(&mut display)
-        .unwrap();
+                // Make sure we only take as much as packet contains...
+                if ((1 + row) * ROW_LEN) > data.len {
+                    Text::new(
+                        &str_format!(str256, "{}", &data.buf[(row * ROW_LEN)..data.len].hex()),
+                        Point::new(2, (36 + (row * 9)).try_into().unwrap()),
+                        text_style,
+                    )
+                    .draw(&mut display)
+                    .unwrap();
+                    break;
+                } else {
+                    Text::new(
+                        &str_format!(str256, "{}", chunk.hex()),
+                        Point::new(2, (36 + (row * 9)).try_into().unwrap()),
+                        text_style,
+                    )
+                    .draw(&mut display)
+                    .unwrap();
+                }
 
-        // Format packet into chunks (we can only fit 12 bytes on a row)
-        let mut row = 0;
-        const ROW_LEN: usize = 12;
-        for chunk in data.buf.chunks(ROW_LEN) {
-            if row > 3 {
-                // TODO: Num bytes rx? Data overflow notification?
-                break;
+                row += 1;
             }
 
-            // Make sure we only take as much as packet contains...
-            if ((1 + row) * ROW_LEN) > data.len {
-                Text::new(
-                    &str_format!(str256, "{}", &data.buf[(row * ROW_LEN)..data.len].hex()),
-                    Point::new(2, (36 + (row * 9)).try_into().unwrap()),
-                    text_style,
-                )
-                .draw(&mut display)
-                .unwrap();
-                break;
-            } else {
-                Text::new(
-                    &str_format!(str256, "{}", chunk.hex()),
-                    Point::new(2, (36 + (row * 9)).try_into().unwrap()),
-                    text_style,
-                )
-                .draw(&mut display)
-                .unwrap();
-            }
-
-            row += 1;
+            display.flush().unwrap();
         }
-
-        display.flush().unwrap();
     }
 }
 
@@ -368,12 +406,7 @@ async fn lora_handler(
     defmt::info!("Initializing modulation parameters");
 
     let mdltn_params = {
-        match lora.create_modulation_params(
-            SpreadingFactor::_10,
-            LORA_BANDWIDTH,
-            CodingRate::_4_8,
-            LORA_FREQUENCY_IN_HZ,
-        ) {
+        match lora.create_modulation_params(LORA_SF.0, LORA_BW.0, LORA_CR.0, LORA_FREQUENCY_IN_HZ) {
             Ok(mp) => mp,
             Err(err) => {
                 defmt::info!("Radio error = {}", err);
@@ -424,6 +457,7 @@ async fn lora_handler(
                 ];
                 */
                 let msg = Message {
+                    // len: RX_BUF_LEN as usize,
                     len: len.into(),
                     buf,
                     rssi: status.rssi,
@@ -461,12 +495,7 @@ async fn lora_handler(
     const MAX_TX_POWER: i32 = 14;
 
     let mdltn_params = {
-        match lora.create_modulation_params(
-            SpreadingFactor::_10,
-            LORA_BANDWIDTH,
-            CodingRate::_4_8,
-            LORA_FREQUENCY_IN_HZ,
-        ) {
+        match lora.create_modulation_params(LORA_SF.0, LORA_BW.0, LORA_CR.0, LORA_FREQUENCY_IN_HZ) {
             Ok(mp) => mp,
             Err(err) => {
                 defmt::info!("Radio error = {}", err);

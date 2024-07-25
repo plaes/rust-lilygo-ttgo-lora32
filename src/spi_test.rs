@@ -110,7 +110,6 @@ async fn main(_spawner: Spawner) {
     let _ = spi_dev.transaction(&mut ops).await;
     defmt::info!("...done");
 
-
     loop {
         defmt::info!("MAIN LOOP!");
         Timer::after(Duration::from_millis(1_000)).await;
