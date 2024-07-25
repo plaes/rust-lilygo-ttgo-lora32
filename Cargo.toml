@@ -40,16 +40,15 @@ no_std_strings = "0.1.3"
 #embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy", rev = "64ab23d17d9addd82f0b11a27a3d2219c1a8ec20" }
 
 [features]
-receiver = []
+default = []
 
 [[bin]]
 name = "transmit"
 path = "src/p2p_transmit.rs"
 
 [[bin]]
-name = "receiver"
-path = "src/main.rs"
-required-features = ["receiver"]
+name = "receive"
+path = "src/p2p_receive.rs"
 
 [[bin]]
 name = "spi_test"
