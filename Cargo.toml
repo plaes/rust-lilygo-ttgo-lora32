@@ -50,3 +50,7 @@ path = "src/main.rs"
 name = "receiver"
 path = "src/main.rs"
 required-features = ["receiver"]
+
+[[bin]]
+name = "spi_test"
+path = "src/spi_test.rs"
