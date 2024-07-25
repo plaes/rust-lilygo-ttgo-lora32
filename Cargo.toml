@@ -43,8 +43,8 @@ no_std_strings = "0.1.3"
 receiver = []
 
 [[bin]]
-name = "transmitter"
-path = "src/main.rs"
+name = "transmit"
+path = "src/p2p_transmit.rs"
 
 [[bin]]
 name = "receiver"
