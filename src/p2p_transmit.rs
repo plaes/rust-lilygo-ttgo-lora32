@@ -306,7 +306,7 @@ async fn oled_task(
         .draw(&mut display)
         .unwrap();
         display.flush().unwrap();
- 
+
         Timer::after(Duration::from_millis(3_000)).await;
         display.clear(BinaryColor::Off).unwrap();
     }

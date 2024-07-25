@@ -49,11 +49,11 @@ use static_cell::StaticCell;
 
 use hex_display::HexDisplayExt;
 
-const RX_BUF_LEN: u8 = 255;
+const RX_BUF_LEN: usize = 255;
 
 struct Message {
     len: usize,
-    buf: [u8; RX_BUF_LEN as usize],
+    buf: [u8; RX_BUF_LEN],
     rssi: i16,
     snr: i16,
 }
@@ -291,106 +291,85 @@ async fn oled_task(
     .draw(&mut display)
     .unwrap();
 
-    #[cfg(not(feature = "receiver"))]
+    Text::with_alignment(
+        "LoRa P2P RX!",
+        display.bounding_box().center() + Point::new(0, 14),
+        text_style,
+        Alignment::Center,
+    )
+    .draw(&mut display)
+    .unwrap();
+
+    display.flush().unwrap();
+
+    Timer::after(Duration::from_millis(1_000)).await;
+
     loop {
-        defmt::info!("main loop!");
+        use no_std_strings::{str256, str64, str_format};
 
-        Text::with_alignment(
-            "LoRa P2P TX!",
-            display.bounding_box().center() + Point::new(0, 14),
+        let data = channel.receive().await;
+
+        display.clear(BinaryColor::Off).unwrap();
+
+        Text::new(
+            &str_format!(
+                str64,
+                "RX Freq: {}MHz\nBW{}, CR{}, SF{}",
+                LORA_FREQUENCY_IN_HZ as f64 / 1_000_000.0,
+                LORA_BW,
+                LORA_CR,
+                LORA_SF,
+            ),
+            Point::new(0, 8),
             text_style,
-            Alignment::Center,
-        )
-        .draw(&mut display)
-        .unwrap();
-        display.flush().unwrap();
-
-        Timer::after(Duration::from_millis(3_000)).await;
-    }
-
-    #[cfg(feature = "receiver")]
-    {
-        Text::with_alignment(
-            "LoRa P2P RX!",
-            display.bounding_box().center() + Point::new(0, 14),
-            text_style,
-            Alignment::Center,
         )
         .draw(&mut display)
         .unwrap();
 
-        display.flush().unwrap();
+        Text::new(
+            &str_format!(str64, "RSSI/SNR: {}/{}, data:", data.rssi, data.snr),
+            Point::new(0, 28),
+            text_style,
+        )
+        .draw(&mut display)
+        .unwrap();
 
-        Timer::after(Duration::from_millis(1_000)).await;
-
-        loop {
-            use no_std_strings::{str256, str64, str_format};
-
-            let data = channel.receive().await;
-
-            display.clear(BinaryColor::Off).unwrap();
-
-            Text::new(
-                &str_format!(
-                    str64,
-                    "F: {}MHz\nBW{}, CR{}, SF{}",
-                    LORA_FREQUENCY_IN_HZ as f64 / 1_000_000.0,
-                    LORA_BW,
-                    LORA_CR,
-                    LORA_SF,
-                ),
-                Point::new(0, 8),
-                text_style,
-            )
-            .draw(&mut display)
-            .unwrap();
-
-            Text::new(
-                &str_format!(str64, "RSSI/SNR: {}/{}, data:", data.rssi, data.snr),
-                Point::new(0, 28),
-                text_style,
-            )
-            .draw(&mut display)
-            .unwrap();
-
-            // Format packet into chunks (we can only fit 12 bytes on a row)
-            let mut row = 0;
-            const ROW_LEN: usize = 12;
-            for chunk in data.buf.chunks(ROW_LEN) {
-                if row > 3 {
-                    // TODO: Num bytes rx? Data overflow notification?
-                    break;
-                }
-
-                // Make sure we only take as much as packet contains...
-                if ((1 + row) * ROW_LEN) > data.len {
-                    Text::new(
-                        &str_format!(str256, "{}", &data.buf[(row * ROW_LEN)..data.len].hex()),
-                        Point::new(2, (36 + (row * 9)).try_into().unwrap()),
-                        text_style,
-                    )
-                    .draw(&mut display)
-                    .unwrap();
-                    break;
-                } else {
-                    Text::new(
-                        &str_format!(str256, "{}", chunk.hex()),
-                        Point::new(2, (36 + (row * 9)).try_into().unwrap()),
-                        text_style,
-                    )
-                    .draw(&mut display)
-                    .unwrap();
-                }
-
-                row += 1;
+        // Format packet into chunks (we can only fit 12 bytes on a row)
+        let mut row = 0;
+        const ROW_LEN: usize = 12;
+        for chunk in data.buf.chunks(ROW_LEN) {
+            if row > 3 {
+                // TODO: Num bytes rx? Data overflow notification?
+                break;
             }
 
-            display.flush().unwrap();
+            // Make sure we only take as much as packet contains...
+            if ((1 + row) * ROW_LEN) > data.len {
+                Text::new(
+                    &str_format!(str256, "{}", &data.buf[(row * ROW_LEN)..data.len].hex()),
+                    Point::new(2, (36 + (row * 9)).try_into().unwrap()),
+                    text_style,
+                )
+                .draw(&mut display)
+                .unwrap();
+                break;
+            } else {
+                Text::new(
+                    &str_format!(str256, "{}", chunk.hex()),
+                    Point::new(2, (36 + (row * 9)).try_into().unwrap()),
+                    text_style,
+                )
+                .draw(&mut display)
+                .unwrap();
+            }
+
+            row += 1;
         }
+
+        display.flush().unwrap();
     }
 }
 
-#[cfg(feature = "receiver")]
 #[embassy_executor::task]
 async fn lora_handler(
     mut lora: LoRa<
@@ -416,7 +395,7 @@ async fn lora_handler(
     };
 
     let rx_pkt_params = {
-        match lora.create_rx_packet_params(4, false, RX_BUF_LEN, true, false, &mdltn_params) {
+        match lora.create_rx_packet_params(4, false, RX_BUF_LEN as u8, true, false, &mdltn_params) {
             Ok(pp) => pp,
             Err(err) => {
                 defmt::info!("Radio error: {}", err);
@@ -445,10 +424,10 @@ async fn lora_handler(
     loop {
         defmt::info!("RX LOOP!");
 
-        let mut rx_buf = [0u8; RX_BUF_LEN as usize];
+        let mut rx_buf = [0u8; RX_BUF_LEN];
         match lora.rx(&rx_pkt_params, &mut rx_buf).await {
             Ok((len, status)) => {
-                let mut buf = [0; RX_BUF_LEN as usize];
+                let mut buf = [0; RX_BUF_LEN];
                 buf.copy_from_slice(&rx_buf);
                 /*
                 let mut buf = [
@@ -476,72 +455,5 @@ async fn lora_handler(
             Err(err) => defmt::info!("rx unsuccessful = {}", err),
         }
         Timer::after(Duration::from_millis(1_000)).await;
-    }
-}
-
-#[cfg(not(feature = "receiver"))]
-#[embassy_executor::task]
-async fn lora_handler(
-    mut lora: LoRa<
-        Sx127x<
-            ExclusiveDevice<SafeSpiDma, Output<'static, GpioPin<18>>, embassy_time::Delay>,
-            SxIfaceVariant,
-            Sx1276,
-        >,
-        Delay,
-    >,
-    channel: Sender<'static, NoopRawMutex, Message, 1>,
-) {
-    const MAX_TX_POWER: i32 = 14;
-
-    let mdltn_params = {
-        match lora.create_modulation_params(LORA_SF.0, LORA_BW.0, LORA_CR.0, LORA_FREQUENCY_IN_HZ) {
-            Ok(mp) => mp,
-            Err(err) => {
-                defmt::info!("Radio error = {}", err);
-                return;
-            }
-        }
-    };
-
-    defmt::info!("Initializing packet parameters");
-    let mut tx_pkt_params = {
-        match lora.create_tx_packet_params(4, false, true, false, &mdltn_params) {
-            Ok(pp) => pp,
-            Err(err) => {
-                defmt::info!("Radio error = {}", err);
-                return;
-            }
-        }
-    };
-    loop {
-        // NB! Seems like transfers of 3, 5, 6 and 8 bytes fail
-        // https://github.com/esp-rs/esp-hal/issues/1798
-        let send = [4, 3, 2, 1];
-
-        defmt::info!("Preparing radio!");
-        match lora
-            .prepare_for_tx(&mdltn_params, &mut tx_pkt_params, MAX_TX_POWER, &send)
-            .await
-        {
-            Ok(()) => {
-                defmt::info!("Radio prepared!");
-            }
-            Err(err) => {
-                defmt::info!("Radio error = {}", err);
-                return;
-            }
-        };
-
-        match lora.tx().await {
-            Ok(()) => {
-                defmt::info!("TX DONE");
-            }
-            Err(err) => {
-                defmt::info!("Radio error = {}", err);
-                return;
-            }
-        };
-        Timer::after(Duration::from_millis(5_000)).await;
     }
 }
