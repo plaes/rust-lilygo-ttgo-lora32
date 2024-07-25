@@ -99,11 +99,11 @@ async fn main(_spawner: Spawner) {
     defmt::info!("...done");
     assert_eq!(write, read);
 
-    let mut write_buf = &[0xaa];
+    let write_buf = &[0xaa];
     //let mut payload = &[0xd1, 0xd2, 0xd3, 0xd4];
     // Works with 1..4 bytes
     // Hangs when payload is > 4 bytes??
-    let mut payload = &[0xd1, 0xd2, 0xd3, 0xd5, 0xd5];
+    let payload = &[0xd1, 0xd2, 0xd3, 0xd5, 0xd5];
 
     defmt::info!("TX... ");
     let mut ops = [Operation::Write(write_buf), Operation::Write(payload)];
