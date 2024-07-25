@@ -3,7 +3,7 @@
 
 use embassy_executor::Spawner;
 use embassy_time::{Delay, Duration, Timer};
-use embedded_hal_async::spi::SpiDevice;
+use embedded_hal_async::spi::{Operation, SpiDevice};
 use embedded_hal_bus::spi::ExclusiveDevice;
 
 use esp_backtrace as _;
@@ -98,6 +98,18 @@ async fn main(_spawner: Spawner) {
 
     defmt::info!("...done");
     assert_eq!(write, read);
+
+    let mut write_buf = &[0xaa];
+    //let mut payload = &[0xd1, 0xd2, 0xd3, 0xd4];
+    // Works with 1..4 bytes
+    // Hangs when payload is > 4 bytes??
+    let mut payload = &[0xd1, 0xd2, 0xd3, 0xd5, 0xd5];
+
+    defmt::info!("TX... ");
+    let mut ops = [Operation::Write(write_buf), Operation::Write(payload)];
+    let _ = spi_dev.transaction(&mut ops).await;
+    defmt::info!("...done");
+
 
     loop {
         defmt::info!("MAIN LOOP!");
