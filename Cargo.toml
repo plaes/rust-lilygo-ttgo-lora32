@@ -13,7 +13,7 @@ embedded-hal = "1"
 embedded-hal-async = "1"
 embedded-hal-bus = { version = "0.2.0", features = ["async"] }
 
-esp-backtrace = { version = "0.12.1", features = ["esp32", "defmt", "panic-handler", "exception-handler"] }
+esp-backtrace = { version = "0.13", features = ["esp32", "defmt", "panic-handler", "exception-handler"] }
 esp-hal = { version = "0.19.0", features=["default", "esp32", "defmt", "async", "embedded-hal"]}
 esp-hal-embassy = { version = "0.2.0", features=["esp32", "defmt", "integrated-timers"]}
 esp-println = { version = "0.9.1", features = ["defmt-espflash", "esp32"] }
@@ -32,10 +32,12 @@ no_std_strings = "0.1.3"
 ssd1306 = { git = "https://github.com/rust-embedded-community/ssd1306", branch = "master" }
 
 [patch.crates-io]
-# TODO: Async DMA is broken, see https://github.com/esp-rs/esp-hal/issues/1857
-esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "38f1d2858598acf8348f9732c192f448cb7985ab" }
+# TODO: Async SPI with DMA was broken, see https://github.com/esp-rs/esp-hal/issues/1857
+#esp-hal = { path = "../esp-hal/esp-hal" }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "2744a5dd86c0ff3b7a710969f60c7cad67b5539f" }
 # TODO: No release for 0.19.0
-esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal", rev = "38f1d2858598acf8348f9732c192f448cb7985ab" }
+# esp-hal-embassy = { path = "../esp-hal/esp-hal-embassy" }
+esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal", rev = "2744a5dd86c0ff3b7a710969f60c7cad67b5539f" }
 
 [features]
 default = []

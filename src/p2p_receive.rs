@@ -134,8 +134,9 @@ async fn main(spawner: Spawner) {
     let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
 
     let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks);
-    let timer0 = OneShotTimer::new(timg0.timer0.into());
-    let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], [timer0]);
+    let timer0: ErasedTimer = timg0.timer0.into();
+    let timers = [OneShotTimer::new(timer0)];
+    let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], timers);
 
     defmt::debug!("Init clocks!");
 

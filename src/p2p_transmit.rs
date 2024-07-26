@@ -127,8 +127,9 @@ async fn main(spawner: Spawner) {
     let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
 
     let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks);
-    let timer0 = OneShotTimer::new(timg0.timer0.into());
-    let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], [timer0]);
+    let timer0: ErasedTimer = timg0.timer0.into();
+    let timers = [OneShotTimer::new(timer0)];
+    let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], timers);
 
     defmt::debug!("Init clocks!");
 
@@ -350,7 +351,7 @@ async fn lora_handler(
     loop {
         // NB! Seems like transfers of 3, 5, 6 and 8 bytes fail
         // https://github.com/esp-rs/esp-hal/issues/1798
-        let send = [packet, 0x3a, 0xa3, packet];
+        let send = [packet, 0x3a, 0xa3, packet, 0xff, 0xaa];
 
         (packet, _) = packet.overflowing_add(1);
 
