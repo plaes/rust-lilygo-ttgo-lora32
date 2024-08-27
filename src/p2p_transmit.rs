@@ -13,19 +13,19 @@ use esp_println as _;
 
 use esp_hal::{
     clock::ClockControl,
-    dma::{Dma, DmaPriority, Spi2DmaChannel},
-    dma_descriptors,
-    gpio::{any_pin::AnyPin, GpioPin, Input, Io, Level, Output, Pull, NO_PIN},
+    dma::{Dma, DmaPriority, DmaRxBuf, DmaTxBuf, Spi2DmaChannel},
+    dma_buffers,
+    gpio::{AnyPin, GpioPin, Input, Io, Level, Output, Pull, NO_PIN},
     i2c::I2C,
     peripherals::{Peripherals, I2C0},
     prelude::*,
     spi::{
-        master::{dma::SpiDma, prelude::*, Spi},
-        FullDuplexMode, SpiMode,
+        master::{dma::asynch::SpiDmaAsyncBus, Spi},
+        SpiMode,
     },
     system::SystemControl,
     timer::{timg::TimerGroup, ErasedTimer, OneShotTimer},
-    Async, FlashSafeDma,
+    Async,
 };
 
 use embedded_graphics::{
@@ -103,18 +103,15 @@ const LORA_BW: LoRaBw = LoRaBw(Bandwidth::_250KHz);
 const LORA_SF: LoRaSf = LoRaSf(SpreadingFactor::_10);
 const LORA_CR: LoRaCr = LoRaCr(CodingRate::_4_8);
 const LORA_FREQUENCY_IN_HZ: u32 = 868_100_000;
-const DMA_BUF: usize = 256;
+const DMA_BUF_SIZE: usize = 1024;
 
 type OledIface = I2CInterface<I2C<'static, I2C0, Async>>;
-
-type SafeSpiDma = FlashSafeDma<
-    SpiDma<'static, esp_hal::peripherals::SPI2, Spi2DmaChannel, FullDuplexMode, Async>,
-    DMA_BUF,
->;
 
 // TODO: Figure out AnyPin
 type SxIfaceVariant =
     GenericSx127xInterfaceVariant<Output<'static, GpioPin<22>>, Input<'static, GpioPin<26>>>;
+type SpiBus = SpiDmaAsyncBus<'static, esp_hal::peripherals::SPI2, Spi2DmaChannel>;
+type LoraSpiDev = ExclusiveDevice<SpiBus, Output<'static, GpioPin<18>>, Delay>;
 
 #[main]
 async fn main(spawner: Spawner) {
@@ -166,7 +163,9 @@ async fn main(spawner: Spawner) {
     let dma = Dma::new(peripherals.DMA);
     let dma_channel = dma.spi2channel;
 
-    let (tx_descriptors, rx_descriptors) = dma_descriptors!(1024);
+    let (tx_buffer, tx_descriptors, rx_buffer, rx_descriptors) = dma_buffers!(DMA_BUF_SIZE);
+    let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
+    let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
 
     let sclk = io.pins.gpio5;
     let miso = io.pins.gpio19;
@@ -177,13 +176,8 @@ async fn main(spawner: Spawner) {
         // use NO_PIN for CS as we'll going to be using the SpiDevice trait
         // via ExclusiveSpiDevice as we don't (yet) want to pull in embassy-sync
         .with_pins(Some(sclk), Some(mosi), Some(miso), NO_PIN)
-        .with_dma(
-            dma_channel.configure_for_async(false, DmaPriority::Priority0),
-            tx_descriptors,
-            rx_descriptors,
-        );
-
-    let spi: SafeSpiDma = FlashSafeDma::new(spi);
+        .with_dma(dma_channel.configure_for_async(false, DmaPriority::Priority0))
+        .with_buffers(dma_tx_buf, dma_rx_buf);
 
     let spi_dev = ExclusiveDevice::new(spi, cs, Delay).unwrap();
 
@@ -315,14 +309,7 @@ async fn oled_task(
 
 #[embassy_executor::task]
 async fn lora_handler(
-    mut lora: LoRa<
-        Sx127x<
-            ExclusiveDevice<SafeSpiDma, Output<'static, GpioPin<18>>, embassy_time::Delay>,
-            SxIfaceVariant,
-            Sx1276,
-        >,
-        Delay,
-    >,
+    mut lora: LoRa<Sx127x<LoraSpiDev, SxIfaceVariant, Sx1276>, Delay>,
     channel: Sender<'static, NoopRawMutex, Message, 1>,
 ) {
     const MAX_TX_POWER: i32 = 14;
@@ -351,7 +338,7 @@ async fn lora_handler(
     loop {
         // NB! Seems like transfers of 3, 5, 6 and 8 bytes fail
         // https://github.com/esp-rs/esp-hal/issues/1798
-        let send = [packet, 0x3a, 0xa3, packet, 0xff, 0xaa];
+        let send = [packet, 0x3a, 0xa3, packet];
 
         (packet, _) = packet.overflowing_add(1);
 

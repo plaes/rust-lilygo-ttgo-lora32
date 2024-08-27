@@ -9,7 +9,7 @@ use esp_println as _;
 
 use esp_hal::{
     clock::ClockControl,
-    gpio::{any_pin::AnyPin, Input, Io, Level, Output, Pull},
+    gpio::{AnyPin, Input, Io, Level, Output, Pull},
     peripherals::Peripherals,
     prelude::*,
     system::SystemControl,

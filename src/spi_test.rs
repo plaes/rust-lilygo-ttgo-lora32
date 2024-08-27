@@ -11,18 +11,14 @@ use esp_println as _;
 
 use esp_hal::{
     clock::ClockControl,
-    dma::{Dma, DmaPriority, Spi2DmaChannel},
-    dma_descriptors,
+    dma::{Dma, DmaPriority, DmaRxBuf, DmaTxBuf},
+    dma_buffers,
     gpio::{Io, Level, Output, NO_PIN},
     peripherals::Peripherals,
     prelude::*,
-    spi::{
-        master::{dma::SpiDma, prelude::*, Spi},
-        FullDuplexMode, SpiMode,
-    },
+    spi::{master::Spi, SpiMode},
     system::SystemControl,
     timer::{timg::TimerGroup, ErasedTimer, OneShotTimer},
-    Async, FlashSafeDma,
 };
 
 use static_cell::StaticCell;
@@ -33,13 +29,6 @@ macro_rules! mk_static {
         STATIC_CELL.uninit().write(($val))
     }};
 }
-
-const DMA_BUF: usize = 256;
-
-type SafeSpiDma = FlashSafeDma<
-    SpiDma<'static, esp_hal::peripherals::SPI2, Spi2DmaChannel, FullDuplexMode, Async>,
-    DMA_BUF,
->;
 
 #[main]
 async fn main(_spawner: Spawner) {
@@ -64,7 +53,9 @@ async fn main(_spawner: Spawner) {
     let dma = Dma::new(peripherals.DMA);
     let dma_channel = dma.spi2channel;
 
-    let (tx_descriptors, rx_descriptors) = dma_descriptors!(1024);
+    let (tx_buffer, tx_descriptors, rx_buffer, rx_descriptors) = dma_buffers!(1024);
+    let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
+    let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
 
     /*
     let sclk = io.pins.gpio5;
@@ -80,13 +71,8 @@ async fn main(_spawner: Spawner) {
         // use NO_PIN for CS as we'll going to be using the SpiDevice trait
         // via ExclusiveSpiDevice as we don't (yet) want to pull in embassy-sync
         .with_pins(Some(sclk), Some(mosi), Some(miso), NO_PIN)
-        .with_dma(
-            dma_channel.configure_for_async(false, DmaPriority::Priority0),
-            tx_descriptors,
-            rx_descriptors,
-        );
-
-    let spi: SafeSpiDma = FlashSafeDma::new(spi);
+        .with_dma(dma_channel.configure_for_async(false, DmaPriority::Priority0))
+        .with_buffers(dma_tx_buf, dma_rx_buf);
 
     let mut spi_dev = ExclusiveDevice::new(spi, cs, Delay).unwrap();
 
