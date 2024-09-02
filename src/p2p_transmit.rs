@@ -20,8 +20,8 @@ use esp_hal::{
     peripherals::{Peripherals, I2C0},
     prelude::*,
     spi::{
-        master::{dma::asynch::SpiDmaAsyncBus, Spi},
-        SpiMode,
+        master::{Spi, SpiDmaBus},
+        FullDuplexMode, SpiMode,
     },
     system::SystemControl,
     timer::{timg::TimerGroup, ErasedTimer, OneShotTimer},
@@ -110,10 +110,10 @@ type OledIface = I2CInterface<I2C<'static, I2C0, Async>>;
 // TODO: Figure out AnyPin
 type SxIfaceVariant =
     GenericSx127xInterfaceVariant<Output<'static, GpioPin<22>>, Input<'static, GpioPin<26>>>;
-type SpiBus = SpiDmaAsyncBus<'static, esp_hal::peripherals::SPI2, Spi2DmaChannel>;
+type SpiBus = SpiDmaBus<'static, esp_hal::peripherals::SPI2, Spi2DmaChannel, FullDuplexMode, Async>;
 type LoraSpiDev = ExclusiveDevice<SpiBus, Output<'static, GpioPin<18>>, Delay>;
 
-#[main]
+#[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
     defmt::debug!("Init!");
 

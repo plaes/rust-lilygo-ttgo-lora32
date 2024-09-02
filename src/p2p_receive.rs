@@ -20,8 +20,8 @@ use esp_hal::{
     peripherals::{Peripherals, I2C0},
     prelude::*,
     spi::{
-        master::{dma::asynch::SpiDmaAsyncBus, Spi},
-        SpiMode,
+        master::{Spi, SpiDmaBus},
+        FullDuplexMode, SpiMode,
     },
     system::SystemControl,
     timer::{timg::TimerGroup, ErasedTimer, OneShotTimer},
@@ -118,10 +118,10 @@ type OledIface = I2CInterface<I2C<'static, I2C0, Async>>;
 type SxIfaceVariant =
     GenericSx127xInterfaceVariant<Output<'static, GpioPin<22>>, Input<'static, GpioPin<26>>>;
 
-type SpiBus = SpiDmaAsyncBus<'static, esp_hal::peripherals::SPI2, Spi2DmaChannel>;
+type SpiBus = SpiDmaBus<'static, esp_hal::peripherals::SPI2, Spi2DmaChannel, FullDuplexMode, Async>;
 type LoraSpiDev = ExclusiveDevice<SpiBus, Output<'static, GpioPin<18>>, Delay>;
 
-#[main]
+#[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
     defmt::debug!("Init!");
 
@@ -416,11 +416,13 @@ async fn lora_handler(
     loop {
         defmt::info!("RX LOOP!");
 
-        let mut rx_buf = [0u8; RX_BUF_LEN];
+        let mut rx_buf = [0xa; RX_BUF_LEN];
         match lora.rx(&rx_pkt_params, &mut rx_buf).await {
             Ok((len, status)) => {
+                defmt::info!("XXX\n\n\n\nXXX");
+
                 defmt::info!("{:?}", rx_buf);
-                let mut buf = [0; RX_BUF_LEN];
+                let mut buf = [0xa; RX_BUF_LEN];
                 buf.copy_from_slice(&rx_buf);
                 /*
                 let mut buf = [
@@ -428,6 +430,14 @@ async fn lora_handler(
                     7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
                 ];
                 */
+
+                defmt::info!(
+                    "rx successful (got {} bytes): {:?}",
+                    len,
+                    rx_buf[0..len as usize]
+                );
+                defmt::info!("RSSI: {}, SNR: {}", status.rssi, status.snr);
+
                 let msg = Message {
                     // len: RX_BUF_LEN as usize,
                     len: len.into(),
@@ -436,14 +446,8 @@ async fn lora_handler(
                     snr: status.snr,
                 };
 
-                channel.send(msg).await;
 
-                defmt::info!(
-                    "rx successful (got {} bytes): {:?}",
-                    len,
-                    rx_buf[0..len as usize]
-                );
-                defmt::info!("RSSI: {}, SNR: {}", status.rssi, status.snr);
+                channel.send(msg).await;
             }
             Err(err) => defmt::info!("rx unsuccessful = {}", err),
         }

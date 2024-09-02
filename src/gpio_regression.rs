@@ -25,7 +25,7 @@ macro_rules! mk_static {
     }};
 }
 
-#[main]
+#[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
     defmt::debug!("Init!");
 
