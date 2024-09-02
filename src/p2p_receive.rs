@@ -446,7 +446,6 @@ async fn lora_handler(
                     snr: status.snr,
                 };
 
-
                 channel.send(msg).await;
             }
             Err(err) => defmt::info!("rx unsuccessful = {}", err),

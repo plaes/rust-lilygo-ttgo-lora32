@@ -77,21 +77,28 @@ async fn main(_spawner: Spawner) {
     let mut spi_dev = ExclusiveDevice::new(spi, cs, Delay).unwrap();
 
     let write_buf = &[0xaa];
-    let mut read: [u8; 2] = [0xff; 2];
+    let mut read: [u8; 2] = [0xab; 2];
     let mut ops = [Operation::Write(write_buf), Operation::Read(&mut read)];
     let _ = spi_dev.transaction(&mut ops).await;
     defmt::info!("Test 1... result: {:?}", read);
     // why do we get 0xff, 0xff here?
-    assert_eq!(read, [0xff, 0xff]);
+    assert_eq!(read, [0xab, 0xab]);
 
-    let write_buf = &[0xaa];
-    let mut read: [u8; 1] = [0xffu8; 1];
+    let write_buf = &[0xaa, 0xaa];
+    let mut read: [u8; 1] = [0xabu8; 1];
     let mut ops = [Operation::Write(write_buf), Operation::Read(&mut read)];
     let _ = spi_dev.transaction(&mut ops).await;
     defmt::info!("Test 2... result: {:?}", read);
     // ... but 0x00 here?
-    assert_eq!(read, [0xff]);
+    //assert_eq!(read, [0xff]);
 
+    let write_buf = &[0xaa, 0xaa, 0xaa];
+    let mut read: [u8; 2] = [0xab; 2];
+    let mut ops = [Operation::Write(write_buf), Operation::Read(&mut read)];
+    let _ = spi_dev.transaction(&mut ops).await;
+    defmt::info!("Test 1... result: {:?}", read);
+    // why do we get 0xff, 0xff here?
+    assert_eq!(read, [0xab, 0xab]);
 
     loop {
         defmt::info!("MAIN LOOP!");

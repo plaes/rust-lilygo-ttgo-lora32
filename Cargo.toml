@@ -58,5 +58,9 @@ name = "spi_dma_transaction"
 path = "src/spi_dma_transaction.rs"
 
 [[bin]]
+name = "spi_blocking_transaction"
+path = "src/spi_blocking_transaction.rs"
+
+[[bin]]
 name = "gpio_regression"
 path = "src/gpio_regression.rs"
