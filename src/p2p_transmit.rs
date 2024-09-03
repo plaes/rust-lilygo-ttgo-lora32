@@ -12,18 +12,16 @@ use esp_backtrace as _;
 use esp_println as _;
 
 use esp_hal::{
-    clock::ClockControl,
     dma::{Dma, DmaPriority, DmaRxBuf, DmaTxBuf, Spi2DmaChannel},
     dma_buffers,
     gpio::{AnyPin, GpioPin, Input, Io, Level, Output, Pull, NO_PIN},
     i2c::I2C,
-    peripherals::{Peripherals, I2C0},
+    peripherals::I2C0,
     prelude::*,
     spi::{
         master::{Spi, SpiDmaBus},
         FullDuplexMode, SpiMode,
     },
-    system::SystemControl,
     timer::{timg::TimerGroup, ErasedTimer, OneShotTimer},
     Async,
 };
@@ -115,20 +113,16 @@ type LoraSpiDev = ExclusiveDevice<SpiBus, Output<'static, GpioPin<18>>, Delay>;
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
+    let (peripherals, clocks) = esp_hal::init(esp_hal::Config::default());
+
     defmt::debug!("Init!");
-
-    let channel = CHANNEL.init(Channel::new());
-
-    let peripherals = Peripherals::take();
-    let system = SystemControl::new(peripherals.SYSTEM);
-    let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
 
     let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks);
     let timer0: ErasedTimer = timg0.timer0.into();
     let timers = [OneShotTimer::new(timer0)];
     let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], timers);
 
-    defmt::debug!("Init clocks!");
+    let channel = CHANNEL.init(Channel::new());
 
     esp_hal_embassy::init(&clocks, timers);
 
@@ -338,7 +332,7 @@ async fn lora_handler(
     loop {
         // NB! Seems like transfers of 3, 5, 6 and 8 bytes fail
         // https://github.com/esp-rs/esp-hal/issues/1798
-        let send = [packet, 0x3a, 0xa3, packet];
+        let send = [packet, 0xaa]; //, 0x3a, 0xa3, packet];
 
         (packet, _) = packet.overflowing_add(1);
 

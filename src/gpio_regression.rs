@@ -8,11 +8,7 @@ use esp_backtrace as _;
 use esp_println as _;
 
 use esp_hal::{
-    clock::ClockControl,
     gpio::{AnyPin, Input, Io, Level, Output, Pull},
-    peripherals::Peripherals,
-    prelude::*,
-    system::SystemControl,
     timer::{timg::TimerGroup, ErasedTimer, OneShotTimer},
 };
 
@@ -27,11 +23,9 @@ macro_rules! mk_static {
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    defmt::debug!("Init!");
+    let (peripherals, clocks) = esp_hal::init(esp_hal::Config::default());
 
-    let peripherals = Peripherals::take();
-    let system = SystemControl::new(peripherals.SYSTEM);
-    let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
+    defmt::debug!("Init!");
 
     let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks);
     let timer0: ErasedTimer = timg0.timer0.into();
