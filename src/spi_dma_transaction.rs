@@ -29,18 +29,16 @@ macro_rules! mk_static {
 
 #[esp_hal_embassy::main]
 async fn main(_spawner: Spawner) {
-    let (peripherals, clocks) = esp_hal::init(esp_hal::Config::default());
+    let peripherals = esp_hal::init(esp_hal::Config::default());
 
     defmt::debug!("Init!");
 
-    let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks);
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
     let timer0: ErasedTimer = timg0.timer0.into();
     let timers = [OneShotTimer::new(timer0)];
     let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], timers);
 
-    defmt::debug!("Init clocks!");
-
-    esp_hal_embassy::init(&clocks, timers);
+    esp_hal_embassy::init(timers);
 
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
@@ -62,12 +60,12 @@ async fn main(_spawner: Spawner) {
     let mosi = io.pins.gpio13;
     let cs = Output::new(io.pins.gpio18, Level::Low);
 
-    let spi = Spi::new(peripherals.SPI2, 100.kHz(), SpiMode::Mode0, &clocks)
+    let spi = Spi::new(peripherals.SPI2, 100.kHz(), SpiMode::Mode0)
         // use NO_PIN for CS as we'll going to be using the SpiDevice trait
         // via ExclusiveSpiDevice as we don't (yet) want to pull in embassy-sync
         .with_pins(Some(sclk), Some(mosi), Some(miso), NO_PIN)
         .with_dma(dma_channel.configure_for_async(false, DmaPriority::Priority0))
-        .with_buffers(dma_tx_buf, dma_rx_buf);
+        .with_buffers(dma_rx_buf, dma_tx_buf);
 
     let mut spi_dev = ExclusiveDevice::new(spi, cs, Delay).unwrap();
 

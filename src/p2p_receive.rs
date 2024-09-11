@@ -14,7 +14,7 @@ use esp_println as _;
 use esp_hal::{
     dma::{Dma, DmaPriority, DmaRxBuf, DmaTxBuf, Spi2DmaChannel},
     dma_buffers,
-    gpio::{AnyPin, GpioPin, Input, Io, Level, Output, Pull, NO_PIN},
+    gpio::{AnyPin, ErasedPin, Input, Io, Level, Output, Pull, NO_PIN},
     i2c::I2C,
     peripherals::I2C0,
     prelude::*,
@@ -114,23 +114,23 @@ type OledIface = I2CInterface<I2C<'static, I2C0, Async>>;
 
 // TODO: Figure out AnyPin
 type SxIfaceVariant =
-    GenericSx127xInterfaceVariant<Output<'static, GpioPin<22>>, Input<'static, GpioPin<26>>>;
+    GenericSx127xInterfaceVariant<Output<'static, ErasedPin>, Input<'static, ErasedPin>>;
 
 type SpiBus = SpiDmaBus<'static, esp_hal::peripherals::SPI2, Spi2DmaChannel, FullDuplexMode, Async>;
-type LoraSpiDev = ExclusiveDevice<SpiBus, Output<'static, GpioPin<18>>, Delay>;
+type LoraSpiDev = ExclusiveDevice<SpiBus, Output<'static, ErasedPin>, Delay>;
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    let (peripherals, clocks) = esp_hal::init(esp_hal::Config::default());
+    let peripherals = esp_hal::init(esp_hal::Config::default());
 
     defmt::debug!("Init!");
 
-    let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks);
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
     let timer0: ErasedTimer = timg0.timer0.into();
     let timers = [OneShotTimer::new(timer0)];
     let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], timers);
 
-    esp_hal_embassy::init(&clocks, timers);
+    esp_hal_embassy::init(timers);
 
     let channel = CHANNEL.init(Channel::new());
 
@@ -141,7 +141,6 @@ async fn main(spawner: Spawner) {
         io.pins.gpio4,
         io.pins.gpio15,
         100.kHz(),
-        &clocks,
     );
 
     defmt::debug!("Init i2c!");
@@ -165,7 +164,7 @@ async fn main(spawner: Spawner) {
     let dma = Dma::new(peripherals.DMA);
     let dma_channel = dma.spi2channel;
 
-    let (tx_buffer, tx_descriptors, rx_buffer, rx_descriptors) = dma_buffers!(DMA_BUF_SIZE);
+    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(DMA_BUF_SIZE);
     let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
     let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
 
@@ -174,12 +173,12 @@ async fn main(spawner: Spawner) {
     let mosi = io.pins.gpio27;
     let cs = Output::new(io.pins.gpio18, Level::Low);
 
-    let spi = Spi::new(peripherals.SPI2, 100.kHz(), SpiMode::Mode0, &clocks)
+    let spi = Spi::new(peripherals.SPI2, 100.kHz(), SpiMode::Mode0)
         // use NO_PIN for CS as we'll going to be using the SpiDevice trait
         // via ExclusiveSpiDevice as we don't (yet) want to pull in embassy-sync
         .with_pins(Some(sclk), Some(mosi), Some(miso), NO_PIN)
         .with_dma(dma_channel.configure_for_async(false, DmaPriority::Priority0))
-        .with_buffers(dma_tx_buf, dma_rx_buf);
+        .with_buffers(dma_rx_buf, dma_tx_buf);
 
     let spi_dev = ExclusiveDevice::new(spi, cs, Delay).unwrap();
 

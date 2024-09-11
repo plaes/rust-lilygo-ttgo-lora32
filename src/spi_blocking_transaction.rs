@@ -18,7 +18,7 @@ use esp_hal::{
 
 #[entry]
 fn main() -> ! {
-    let (peripherals, clocks) = esp_hal::init(esp_hal::Config::default());
+    let peripherals = esp_hal::init(esp_hal::Config::default());
 
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
     /*
@@ -42,7 +42,7 @@ fn main() -> ! {
     let mut dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
     */
 
-    let spi = Spi::new(peripherals.SPI2, 100.kHz(), SpiMode::Mode0, &clocks).with_pins(
+    let spi = Spi::new(peripherals.SPI2, 100.kHz(), SpiMode::Mode0).with_pins(
         Some(sclk),
         Some(mosi),
         Some(miso),
@@ -50,7 +50,7 @@ fn main() -> ! {
     );
     // .with_dma(dma_channel.configure(false, DmaPriority::Priority0));
 
-    let delay = Delay::new(&clocks);
+    let delay = Delay::new();
 
     let mut spi = ExclusiveDevice::new(spi, cs, delay).unwrap();
 

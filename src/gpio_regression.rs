@@ -23,18 +23,16 @@ macro_rules! mk_static {
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    let (peripherals, clocks) = esp_hal::init(esp_hal::Config::default());
+    let peripherals = esp_hal::init(esp_hal::Config::default());
 
     defmt::debug!("Init!");
 
-    let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks);
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
     let timer0: ErasedTimer = timg0.timer0.into();
     let timers = [OneShotTimer::new(timer0)];
     let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], timers);
 
-    defmt::debug!("Init clocks!");
-
-    esp_hal_embassy::init(&clocks, timers);
+    esp_hal_embassy::init(timers);
 
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
