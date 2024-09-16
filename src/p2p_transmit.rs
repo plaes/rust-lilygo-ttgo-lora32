@@ -14,7 +14,7 @@ use esp_println as _;
 use esp_hal::{
     dma::{Dma, DmaPriority, DmaRxBuf, DmaTxBuf, Spi2DmaChannel},
     dma_buffers,
-    gpio::{AnyPin, ErasedPin, Input, Io, Level, Output, Pull, NO_PIN},
+    gpio::{AnyPin, Input, Io, Level, NoPin, Output, Pin, Pull},
     i2c::I2C,
     peripherals::I2C0,
     prelude::*,
@@ -22,7 +22,7 @@ use esp_hal::{
         master::{Spi, SpiDmaBus},
         FullDuplexMode, SpiMode,
     },
-    timer::{timg::TimerGroup, ErasedTimer, OneShotTimer},
+    timer::{timg::TimerGroup, AnyTimer, OneShotTimer},
     Async,
 };
 
@@ -107,9 +107,9 @@ type OledIface = I2CInterface<I2C<'static, I2C0, Async>>;
 
 // TODO: Figure out AnyPin
 type SxIfaceVariant =
-    GenericSx127xInterfaceVariant<Output<'static, ErasedPin>, Input<'static, ErasedPin>>;
+    GenericSx127xInterfaceVariant<Output<'static, AnyPin>, Input<'static, AnyPin>>;
 type SpiBus = SpiDmaBus<'static, esp_hal::peripherals::SPI2, Spi2DmaChannel, FullDuplexMode, Async>;
-type LoraSpiDev = ExclusiveDevice<SpiBus, Output<'static, ErasedPin>, Delay>;
+type LoraSpiDev = ExclusiveDevice<SpiBus, Output<'static, AnyPin>, Delay>;
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
@@ -118,9 +118,9 @@ async fn main(spawner: Spawner) {
     defmt::debug!("Init!");
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let timer0: ErasedTimer = timg0.timer0.into();
+    let timer0: AnyTimer = timg0.timer0.into();
     let timers = [OneShotTimer::new(timer0)];
-    let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], timers);
+    let timers = mk_static!([OneShotTimer<AnyTimer>; 1], timers);
 
     let channel = CHANNEL.init(Channel::new());
 
@@ -128,29 +128,20 @@ async fn main(spawner: Spawner) {
 
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
-    let i2c0 = I2C::new_async(
-        peripherals.I2C0,
-        io.pins.gpio4,
-        io.pins.gpio15,
-        100.kHz(),
-    );
+    let i2c0 = I2C::new_async(peripherals.I2C0, io.pins.gpio4, io.pins.gpio15, 100.kHz());
 
     defmt::debug!("Init i2c!");
     let iface = I2CDisplayInterface::new(i2c0);
     let oled_reset = io.pins.gpio16;
     spawner
-        .spawn(oled_task(
-            iface,
-            AnyPin::new(oled_reset),
-            channel.receiver(),
-        ))
+        .spawn(oled_task(iface, oled_reset.degrade(), channel.receiver()))
         .ok();
 
-    let prg_button = io.pins.gpio0;
-    spawner.spawn(button_detect(AnyPin::new(prg_button))).ok();
+    let prg_button = io.pins.gpio0.degrade();
+    spawner.spawn(button_detect(prg_button)).ok();
 
-    let blue_led = io.pins.gpio2;
-    spawner.spawn(led_blinker(AnyPin::new(blue_led))).ok();
+    let blue_led = io.pins.gpio2.degrade();
+    spawner.spawn(led_blinker(blue_led)).ok();
 
     // Init SPI and LoRa
     let dma = Dma::new(peripherals.DMA);
@@ -168,7 +159,7 @@ async fn main(spawner: Spawner) {
     let spi = Spi::new(peripherals.SPI2, 100.kHz(), SpiMode::Mode0)
         // use NO_PIN for CS as we'll going to be using the SpiDevice trait
         // via ExclusiveSpiDevice as we don't (yet) want to pull in embassy-sync
-        .with_pins(Some(sclk), Some(mosi), Some(miso), NO_PIN)
+        .with_pins(sclk, mosi, miso, NoPin)
         .with_dma(dma_channel.configure_for_async(false, DmaPriority::Priority0))
         .with_buffers(dma_rx_buf, dma_tx_buf);
 
@@ -202,7 +193,7 @@ async fn main(spawner: Spawner) {
 }
 
 #[embassy_executor::task]
-async fn led_blinker(pin: AnyPin<'static>) {
+async fn led_blinker(pin: AnyPin) {
     let mut led = Output::new(pin, Level::High);
 
     loop {
@@ -212,7 +203,7 @@ async fn led_blinker(pin: AnyPin<'static>) {
 }
 
 #[embassy_executor::task]
-async fn button_detect(pin: AnyPin<'static>) {
+async fn button_detect(pin: AnyPin) {
     let mut button = Input::new(pin, Pull::Down);
 
     loop {
@@ -228,7 +219,7 @@ async fn button_detect(pin: AnyPin<'static>) {
 #[embassy_executor::task]
 async fn oled_task(
     iface: OledIface,
-    reset: AnyPin<'static>,
+    reset: AnyPin,
     channel: Receiver<'static, NoopRawMutex, Message, 1>,
 ) {
     defmt::debug!("DISPLAY INIT!");

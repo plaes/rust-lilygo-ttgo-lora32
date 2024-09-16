@@ -32,9 +32,9 @@ ssd1306 = "0.9.0"
 
 [patch.crates-io]
 #esp-hal = { path = "../esp-hal/esp-hal" }
-esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "7332f5834a42254906edaecf6af8adfbe0370fbb" }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "2971c08ed4f627f4d6c0cc22807981444edabaa2" }
 #esp-hal-embassy = { path = "../esp-hal/esp-hal-embassy" }
-esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal", rev = "7332f5834a42254906edaecf6af8adfbe0370fbb" }
+esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal", rev = "2971c08ed4f627f4d6c0cc22807981444edabaa2" }
 # lora-phy = { path = "../lora-rs/lora-phy"}
 
 [features]

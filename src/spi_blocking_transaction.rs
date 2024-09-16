@@ -11,7 +11,7 @@ use esp_hal::{
     delay::Delay,
     // dma::{Dma, DmaPriority, DmaRxBuf, DmaTxBuf},
     // dma_buffers,
-    gpio::{Io, NO_PIN},
+    gpio::{Io, NoPin},
     prelude::*,
     spi::{master::Spi, SpiMode},
 };
@@ -42,12 +42,8 @@ fn main() -> ! {
     let mut dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
     */
 
-    let spi = Spi::new(peripherals.SPI2, 100.kHz(), SpiMode::Mode0).with_pins(
-        Some(sclk),
-        Some(mosi),
-        Some(miso),
-        NO_PIN,
-    );
+    let spi =
+        Spi::new(peripherals.SPI2, 100.kHz(), SpiMode::Mode0).with_pins(sclk, mosi, miso, NoPin);
     // .with_dma(dma_channel.configure(false, DmaPriority::Priority0));
 
     let delay = Delay::new();

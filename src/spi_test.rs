@@ -12,10 +12,10 @@ use esp_println as _;
 use esp_hal::{
     dma::{Dma, DmaPriority, DmaRxBuf, DmaTxBuf},
     dma_buffers,
-    gpio::{Io, Level, Output, NO_PIN},
+    gpio::{Io, Level, NoPin, Output},
     prelude::*,
     spi::{master::Spi, SpiMode},
-    timer::{timg::TimerGroup, ErasedTimer, OneShotTimer},
+    timer::{timg::TimerGroup, AnyTimer, OneShotTimer},
 };
 
 use static_cell::StaticCell;
@@ -34,9 +34,9 @@ async fn main(_spawner: Spawner) {
     defmt::debug!("Init!");
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let timer0: ErasedTimer = timg0.timer0.into();
+    let timer0: AnyTimer = timg0.timer0.into();
     let timers = [OneShotTimer::new(timer0)];
-    let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], timers);
+    let timers = mk_static!([OneShotTimer<AnyTimer>; 1], timers);
 
     esp_hal_embassy::init(timers);
 
@@ -61,9 +61,9 @@ async fn main(_spawner: Spawner) {
     let cs = Output::new(io.pins.gpio18, Level::Low);
 
     let spi = Spi::new(peripherals.SPI2, 100.kHz(), SpiMode::Mode0)
-        // use NO_PIN for CS as we'll going to be using the SpiDevice trait
+        // use NoPin for CS as we'll going to be using the SpiDevice trait
         // via ExclusiveSpiDevice as we don't (yet) want to pull in embassy-sync
-        .with_pins(Some(sclk), Some(mosi), Some(miso), NO_PIN)
+        .with_pins(sclk, mosi, miso, NoPin)
         .with_dma(dma_channel.configure_for_async(false, DmaPriority::Priority0))
         .with_buffers(dma_rx_buf, dma_tx_buf);
 

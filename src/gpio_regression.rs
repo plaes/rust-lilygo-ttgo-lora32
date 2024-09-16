@@ -8,8 +8,8 @@ use esp_backtrace as _;
 use esp_println as _;
 
 use esp_hal::{
-    gpio::{AnyPin, Input, Io, Level, Output, Pull},
-    timer::{timg::TimerGroup, ErasedTimer, OneShotTimer},
+    gpio::{AnyPin, Input, Io, Level, Output, Pin, Pull},
+    timer::{timg::TimerGroup, AnyTimer, OneShotTimer},
 };
 
 use static_cell::StaticCell;
@@ -28,9 +28,9 @@ async fn main(spawner: Spawner) {
     defmt::debug!("Init!");
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let timer0: ErasedTimer = timg0.timer0.into();
+    let timer0: AnyTimer = timg0.timer0.into();
     let timers = [OneShotTimer::new(timer0)];
-    let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], timers);
+    let timers = mk_static!([OneShotTimer<AnyTimer>; 1], timers);
 
     esp_hal_embassy::init(timers);
 
@@ -38,11 +38,11 @@ async fn main(spawner: Spawner) {
 
     defmt::debug!("Prepare GPIO!");
 
-    let prg_button = io.pins.gpio0;
-    spawner.spawn(button_detect(AnyPin::new(prg_button))).ok();
+    let prg_button = io.pins.gpio0.degrade();
+    spawner.spawn(button_detect(prg_button)).ok();
 
-    let blue_led = io.pins.gpio2;
-    spawner.spawn(led_blinker(AnyPin::new(blue_led))).ok();
+    let blue_led = io.pins.gpio2.degrade();
+    spawner.spawn(led_blinker(blue_led)).ok();
 
     loop {
         defmt::info!("MAIN LOOP!");
@@ -51,7 +51,7 @@ async fn main(spawner: Spawner) {
 }
 
 #[embassy_executor::task]
-async fn led_blinker(pin: AnyPin<'static>) {
+async fn led_blinker(pin: AnyPin) {
     let mut led = Output::new(pin, Level::High);
 
     loop {
@@ -61,7 +61,7 @@ async fn led_blinker(pin: AnyPin<'static>) {
 }
 
 #[embassy_executor::task]
-async fn button_detect(pin: AnyPin<'static>) {
+async fn button_detect(pin: AnyPin) {
     let mut button = Input::new(pin, Pull::Down);
 
     loop {
