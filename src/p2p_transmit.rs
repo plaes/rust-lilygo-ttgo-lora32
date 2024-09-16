@@ -105,11 +105,10 @@ const DMA_BUF_SIZE: usize = 1024;
 
 type OledIface = I2CInterface<I2C<'static, I2C0, Async>>;
 
-// TODO: Figure out AnyPin
 type SxIfaceVariant =
-    GenericSx127xInterfaceVariant<Output<'static, AnyPin>, Input<'static, AnyPin>>;
+    GenericSx127xInterfaceVariant<Output<'static>, Input<'static>>;
 type SpiBus = SpiDmaBus<'static, esp_hal::peripherals::SPI2, Spi2DmaChannel, FullDuplexMode, Async>;
-type LoraSpiDev = ExclusiveDevice<SpiBus, Output<'static, AnyPin>, Delay>;
+type LoraSpiDev = ExclusiveDevice<SpiBus, Output<'static>, Delay>;
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
