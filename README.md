@@ -27,5 +27,12 @@ cargo run --release --bin receive
 
 ## Board pinout
 
+NB! Missing from board pinouts:
+
+* sx1276 dio0 -> esp32 pin 26
+* sx1276 dio1 -> esp32 pin 33
+* sx1276 dio2 -> esp32 pin 32 (?)
+
+
 ![LILYGO LORA32 V1.0 Pinout](/img/lilygo-ttgo-lora32_v1.0_pinout.jpg)
 ![LILYGO LORA32 V1.0 Pinout (alterative)](/img/TTGO-LoRa32-OLED-Board-Pinout.jpg)

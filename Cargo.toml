@@ -14,8 +14,8 @@ embedded-hal-async = "1"
 embedded-hal-bus = { version = "0.2.0", features = ["async"] }
 
 #esp-hal = { version = "0.20.1", features=["default", "esp32", "defmt", "async", "embedded-hal"] }
-esp-hal = { version = "0.20.1", features=["default", "esp32", "defmt"] }
-esp-hal-embassy = { version = "0.3.0", features = ["esp32", "defmt", "integrated-timers", "executors"] }
+esp-hal = { version = "0.21.1", features=["default", "esp32", "defmt"] }
+esp-hal-embassy = { version = "0.4.0", features = ["esp32", "defmt", "integrated-timers", "executors"] }
 esp-backtrace = { version = "0.14", features = ["esp32", "defmt", "panic-handler", "exception-handler"] }
 esp-println = { version = "0.11", features = ["defmt-espflash", "esp32"] }
 

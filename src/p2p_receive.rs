@@ -12,10 +12,10 @@ use esp_backtrace as _;
 use esp_println as _;
 
 use esp_hal::{
-    dma::{Dma, DmaPriority, DmaRxBuf, DmaTxBuf, Spi2DmaChannel},
+    dma::{Dma, DmaPriority, DmaRxBuf, DmaTxBuf},
     dma_buffers,
     gpio::{AnyPin, Input, Io, Level, NoPin, Output, Pin, Pull},
-    i2c::I2C,
+    i2c::I2c,
     peripherals::I2C0,
     prelude::*,
     spi::{
@@ -110,12 +110,11 @@ const LORA_CR: LoRaCr = LoRaCr(CodingRate::_4_8);
 const LORA_FREQUENCY_IN_HZ: u32 = 868_100_000;
 const DMA_BUF_SIZE: usize = 1024;
 
-type OledIface = I2CInterface<I2C<'static, I2C0, Async>>;
+type OledIface = I2CInterface<I2c<'static, I2C0, Async>>;
 
-type SxIfaceVariant =
-    GenericSx127xInterfaceVariant<Output<'static>, Input<'static>>;
+type SxIfaceVariant = GenericSx127xInterfaceVariant<Output<'static>, Input<'static>>;
 
-type SpiBus = SpiDmaBus<'static, esp_hal::peripherals::SPI2, Spi2DmaChannel, FullDuplexMode, Async>;
+type SpiBus = SpiDmaBus<'static, esp_hal::peripherals::SPI2, FullDuplexMode, Async>;
 type LoraSpiDev = ExclusiveDevice<SpiBus, Output<'static>, Delay>;
 
 #[esp_hal_embassy::main]
@@ -135,7 +134,7 @@ async fn main(spawner: Spawner) {
 
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
-    let i2c0 = I2C::new_async(peripherals.I2C0, io.pins.gpio4, io.pins.gpio15, 100.kHz());
+    let i2c0 = I2c::new_async(peripherals.I2C0, io.pins.gpio4, io.pins.gpio15, 100.kHz());
 
     defmt::debug!("Init i2c!");
     let iface = I2CDisplayInterface::new(i2c0);
