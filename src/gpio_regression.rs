@@ -9,17 +9,8 @@ use esp_println as _;
 
 use esp_hal::{
     gpio::{AnyPin, Input, Level, Output, Pin, Pull},
-    timer::{timg::TimerGroup, AnyTimer, OneShotTimer},
+    timer::timg::TimerGroup,
 };
-
-use static_cell::StaticCell;
-
-macro_rules! mk_static {
-    ($t:ty,$val:expr) => {{
-        static STATIC_CELL: StaticCell<$t> = StaticCell::new();
-        STATIC_CELL.uninit().write(($val))
-    }};
-}
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
@@ -28,11 +19,8 @@ async fn main(spawner: Spawner) {
     defmt::debug!("Init!");
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let timer0: AnyTimer = timg0.timer0.into();
-    let timers = [OneShotTimer::new(timer0)];
-    let timers = mk_static!([OneShotTimer<AnyTimer>; 1], timers);
 
-    esp_hal_embassy::init(timers);
+    esp_hal_embassy::init(timg0.timer0);
 
     defmt::debug!("Prepare GPIO!");
 

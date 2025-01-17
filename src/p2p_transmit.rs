@@ -12,16 +12,16 @@ use esp_backtrace as _;
 use esp_println as _;
 
 use esp_hal::{
-    dma::{Dma, DmaPriority, DmaRxBuf, DmaTxBuf},
+    dma::{DmaRxBuf, DmaTxBuf},
     dma_buffers,
     gpio::{AnyPin, Input, Level, Output, Pin, Pull},
-    i2c::master::I2c,
-    prelude::*,
+    i2c::master::{Config as I2cConfig, I2c},
     spi::{
-        master::{Spi, SpiDmaBus},
-        SpiMode,
+        master::{Config as SpiConfig, Spi, SpiDmaBus},
+        Mode,
     },
-    timer::{timg::TimerGroup, AnyTimer, OneShotTimer},
+    time::RateExtU32,
+    timer::timg::TimerGroup,
     Async,
 };
 
@@ -49,13 +49,6 @@ use no_std_strings::{str64, str_format};
 struct Message(u8);
 
 static CHANNEL: StaticCell<Channel<NoopRawMutex, Message, 1>> = StaticCell::new();
-
-macro_rules! mk_static {
-    ($t:ty,$val:expr) => {{
-        static STATIC_CELL: StaticCell<$t> = StaticCell::new();
-        STATIC_CELL.uninit().write(($val))
-    }};
-}
 
 struct LoRaBw(Bandwidth);
 impl Display for LoRaBw {
@@ -115,22 +108,16 @@ async fn main(spawner: Spawner) {
     defmt::debug!("Init!");
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let timer0: AnyTimer = timg0.timer0.into();
-    let timers = [OneShotTimer::new(timer0)];
-    let timers = mk_static!([OneShotTimer<AnyTimer>; 1], timers);
+
+    esp_hal_embassy::init(timg0.timer0);
 
     let channel = CHANNEL.init(Channel::new());
 
-    esp_hal_embassy::init(timers);
-
-    let i2c0 = I2c::new(peripherals.I2C0, {
-        let mut cfg = esp_hal::i2c::master::Config::default();
-        cfg.frequency = 100.kHz();
-        cfg
-    })
-    .with_sda(peripherals.GPIO4)
-    .with_scl(peripherals.GPIO15)
-    .into_async();
+    let i2c0 = I2c::new(peripherals.I2C0, I2cConfig::default())
+        .unwrap()
+        .with_sda(peripherals.GPIO4)
+        .with_scl(peripherals.GPIO15)
+        .into_async();
 
     defmt::debug!("Init i2c!");
     let iface = I2CDisplayInterface::new(i2c0);
@@ -146,9 +133,6 @@ async fn main(spawner: Spawner) {
     spawner.spawn(led_blinker(blue_led)).ok();
 
     // Init SPI and LoRa
-    let dma = Dma::new(peripherals.DMA);
-    let dma_channel = dma.spi2channel;
-
     let (tx_buffer, tx_descriptors, rx_buffer, rx_descriptors) = dma_buffers!(DMA_BUF_SIZE);
     let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
     let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
@@ -158,16 +142,17 @@ async fn main(spawner: Spawner) {
     let mosi = peripherals.GPIO27;
     let cs = Output::new(peripherals.GPIO18, Level::Low);
 
-    let spi = Spi::new_with_config(peripherals.SPI2, {
-        let mut cfg = esp_hal::spi::master::Config::default();
-        cfg.frequency = 100.kHz();
-        cfg.mode = SpiMode::Mode0;
-        cfg
-    })
+    let spi = Spi::new(
+        peripherals.SPI2,
+        SpiConfig::default()
+            .with_frequency(100.kHz())
+            .with_mode(Mode::_0),
+    )
+    .unwrap()
     .with_sck(sclk)
     .with_mosi(mosi)
     .with_miso(miso)
-    .with_dma(dma_channel.configure(false, DmaPriority::Priority0))
+    .with_dma(peripherals.DMA_SPI2)
     .with_buffers(dma_rx_buf, dma_tx_buf)
     .into_async();
 
