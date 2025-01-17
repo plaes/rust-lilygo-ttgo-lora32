@@ -8,7 +8,7 @@ use esp_backtrace as _;
 use esp_println as _;
 
 use esp_hal::{
-    gpio::{AnyPin, Input, Io, Level, Output, Pin, Pull},
+    gpio::{AnyPin, Input, Level, Output, Pin, Pull},
     timer::{timg::TimerGroup, AnyTimer, OneShotTimer},
 };
 
@@ -34,14 +34,12 @@ async fn main(spawner: Spawner) {
 
     esp_hal_embassy::init(timers);
 
-    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
-
     defmt::debug!("Prepare GPIO!");
 
-    let prg_button = io.pins.gpio0.degrade();
+    let prg_button = peripherals.GPIO0.degrade();
     spawner.spawn(button_detect(prg_button)).ok();
 
-    let blue_led = io.pins.gpio2.degrade();
+    let blue_led = peripherals.GPIO2.degrade();
     spawner.spawn(led_blinker(blue_led)).ok();
 
     loop {

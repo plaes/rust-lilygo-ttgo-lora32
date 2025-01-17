@@ -14,8 +14,8 @@ embedded-hal-async = "1"
 embedded-hal-bus = { version = "0.2.0", features = ["async"] }
 
 #esp-hal = { version = "0.20.1", features=["default", "esp32", "defmt", "async", "embedded-hal"] }
-esp-hal = { version = "0.21.1", features=["default", "esp32", "defmt"] }
-esp-hal-embassy = { version = "0.4.0", features = ["esp32", "defmt", "integrated-timers", "executors"] }
+esp-hal = { version = "0.22", features=["default", "esp32", "defmt"] }
+esp-hal-embassy = { version = "0.5.0", features = ["esp32", "defmt", "integrated-timers", "executors"] }
 esp-backtrace = { version = "0.14", features = ["esp32", "defmt", "panic-handler", "exception-handler"] }
 esp-println = { version = "0.11", features = ["defmt-espflash", "esp32"] }
 
@@ -31,10 +31,10 @@ no_std_strings = "0.1.3"
 ssd1306 = "0.9.0"
 
 [patch.crates-io]
-#esp-hal = { path = "../esp-hal/esp-hal" }
-esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "2971c08ed4f627f4d6c0cc22807981444edabaa2" }
-#esp-hal-embassy = { path = "../esp-hal/esp-hal-embassy" }
-esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal", rev = "2971c08ed4f627f4d6c0cc22807981444edabaa2" }
+esp-hal = { path = "../esp-hal/esp-hal" }
+#esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "2971c08ed4f627f4d6c0cc22807981444edabaa2" }
+esp-hal-embassy = { path = "../esp-hal/esp-hal-embassy" }
+#esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal", rev = "2971c08ed4f627f4d6c0cc22807981444edabaa2" }
 # lora-phy = { path = "../lora-rs/lora-phy"}
 
 [features]
@@ -55,10 +55,6 @@ path = "src/spi_test.rs"
 [[bin]]
 name = "spi_dma_transaction"
 path = "src/spi_dma_transaction.rs"
-
-[[bin]]
-name = "spi_blocking_transaction"
-path = "src/spi_blocking_transaction.rs"
 
 [[bin]]
 name = "gpio_regression"

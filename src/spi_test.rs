@@ -12,7 +12,7 @@ use esp_println as _;
 use esp_hal::{
     dma::{Dma, DmaPriority, DmaRxBuf, DmaTxBuf},
     dma_buffers,
-    gpio::{Io, Level, NoPin, Output},
+    gpio::{Level, Output},
     prelude::*,
     spi::{master::Spi, SpiMode},
     timer::{timg::TimerGroup, AnyTimer, OneShotTimer},
@@ -40,8 +40,6 @@ async fn main(_spawner: Spawner) {
 
     esp_hal_embassy::init(timers);
 
-    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
-
     // Init SPI and LoRa
     let dma = Dma::new(peripherals.DMA);
     let dma_channel = dma.spi2channel;
@@ -51,21 +49,27 @@ async fn main(_spawner: Spawner) {
     let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
 
     /*
-    let sclk = io.pins.gpio5;
-    let miso = io.pins.gpio19;
-    let mosi = io.pins.gpio27;
+    let sclk = peripherals.GPIO5;
+    let miso = peripherals.GPIO19;
+    let mosi = peripherals.GPIO27;
     */
-    let sclk = io.pins.gpio5;
-    let miso = io.pins.gpio12;
-    let mosi = io.pins.gpio13;
-    let cs = Output::new(io.pins.gpio18, Level::Low);
+    let sclk = peripherals.GPIO5;
+    let miso = peripherals.GPIO12;
+    let mosi = peripherals.GPIO13;
+    let cs = Output::new(peripherals.GPIO18, Level::Low);
 
-    let spi = Spi::new(peripherals.SPI2, 100.kHz(), SpiMode::Mode0)
-        // use NoPin for CS as we'll going to be using the SpiDevice trait
-        // via ExclusiveSpiDevice as we don't (yet) want to pull in embassy-sync
-        .with_pins(sclk, mosi, miso, NoPin)
-        .with_dma(dma_channel.configure_for_async(false, DmaPriority::Priority0))
-        .with_buffers(dma_rx_buf, dma_tx_buf);
+    let spi = Spi::new_with_config(peripherals.SPI2, {
+        let mut cfg = esp_hal::spi::master::Config::default();
+        cfg.frequency = 100.kHz();
+        cfg.mode = SpiMode::Mode0;
+        cfg
+    })
+    .with_sck(sclk)
+    .with_mosi(mosi)
+    .with_miso(miso)
+    .with_dma(dma_channel.configure(false, DmaPriority::Priority0))
+    .with_buffers(dma_rx_buf, dma_tx_buf)
+    .into_async();
 
     let mut spi_dev = ExclusiveDevice::new(spi, cs, Delay).unwrap();
 

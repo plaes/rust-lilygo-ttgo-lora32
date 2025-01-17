@@ -14,13 +14,12 @@ use esp_println as _;
 use esp_hal::{
     dma::{Dma, DmaPriority, DmaRxBuf, DmaTxBuf},
     dma_buffers,
-    gpio::{AnyPin, Input, Io, Level, NoPin, Output, Pin, Pull},
-    i2c::I2c,
-    peripherals::I2C0,
+    gpio::{AnyPin, Input, Level, Output, Pin, Pull},
+    i2c::master::I2c,
     prelude::*,
     spi::{
         master::{Spi, SpiDmaBus},
-        FullDuplexMode, SpiMode,
+        SpiMode,
     },
     timer::{timg::TimerGroup, AnyTimer, OneShotTimer},
     Async,
@@ -103,10 +102,10 @@ const LORA_CR: LoRaCr = LoRaCr(CodingRate::_4_5);
 const LORA_FREQUENCY_IN_HZ: u32 = 868_100_000;
 const DMA_BUF_SIZE: usize = 1024;
 
-type OledIface = I2CInterface<I2c<'static, I2C0, Async>>;
+type OledIface = I2CInterface<I2c<'static, Async>>;
 
 type SxIfaceVariant = GenericSx127xInterfaceVariant<Output<'static>, Input<'static>>;
-type SpiBus = SpiDmaBus<'static, esp_hal::peripherals::SPI2, FullDuplexMode, Async>;
+type SpiBus = SpiDmaBus<'static, Async>;
 type LoraSpiDev = ExclusiveDevice<SpiBus, Output<'static>, Delay>;
 
 #[esp_hal_embassy::main]
@@ -124,21 +123,26 @@ async fn main(spawner: Spawner) {
 
     esp_hal_embassy::init(timers);
 
-    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
-
-    let i2c0 = I2c::new_async(peripherals.I2C0, io.pins.gpio4, io.pins.gpio15, 100.kHz());
+    let i2c0 = I2c::new(peripherals.I2C0, {
+        let mut cfg = esp_hal::i2c::master::Config::default();
+        cfg.frequency = 100.kHz();
+        cfg
+    })
+    .with_sda(peripherals.GPIO4)
+    .with_scl(peripherals.GPIO15)
+    .into_async();
 
     defmt::debug!("Init i2c!");
     let iface = I2CDisplayInterface::new(i2c0);
-    let oled_reset = io.pins.gpio16;
+    let oled_reset = peripherals.GPIO16;
     spawner
         .spawn(oled_task(iface, oled_reset.degrade(), channel.receiver()))
         .ok();
 
-    let prg_button = io.pins.gpio0.degrade();
+    let prg_button = peripherals.GPIO0.degrade();
     spawner.spawn(button_detect(prg_button)).ok();
 
-    let blue_led = io.pins.gpio2.degrade();
+    let blue_led = peripherals.GPIO2.degrade();
     spawner.spawn(led_blinker(blue_led)).ok();
 
     // Init SPI and LoRa
@@ -149,22 +153,28 @@ async fn main(spawner: Spawner) {
     let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
     let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
 
-    let sclk = io.pins.gpio5;
-    let miso = io.pins.gpio19;
-    let mosi = io.pins.gpio27;
-    let cs = Output::new(io.pins.gpio18, Level::Low);
+    let sclk = peripherals.GPIO5;
+    let miso = peripherals.GPIO19;
+    let mosi = peripherals.GPIO27;
+    let cs = Output::new(peripherals.GPIO18, Level::Low);
 
-    let spi = Spi::new(peripherals.SPI2, 100.kHz(), SpiMode::Mode0)
-        // use NO_PIN for CS as we'll going to be using the SpiDevice trait
-        // via ExclusiveSpiDevice as we don't (yet) want to pull in embassy-sync
-        .with_pins(sclk, mosi, miso, NoPin)
-        .with_dma(dma_channel.configure_for_async(false, DmaPriority::Priority0))
-        .with_buffers(dma_rx_buf, dma_tx_buf);
+    let spi = Spi::new_with_config(peripherals.SPI2, {
+        let mut cfg = esp_hal::spi::master::Config::default();
+        cfg.frequency = 100.kHz();
+        cfg.mode = SpiMode::Mode0;
+        cfg
+    })
+    .with_sck(sclk)
+    .with_mosi(mosi)
+    .with_miso(miso)
+    .with_dma(dma_channel.configure(false, DmaPriority::Priority0))
+    .with_buffers(dma_rx_buf, dma_tx_buf)
+    .into_async();
 
     let spi_dev = ExclusiveDevice::new(spi, cs, Delay).unwrap();
 
-    let lora_reset = Output::new(io.pins.gpio22, Level::Low);
-    let lora_dio0 = Input::new(io.pins.gpio26, Pull::None);
+    let lora_reset = Output::new(peripherals.GPIO22, Level::Low);
+    let lora_dio0 = Input::new(peripherals.GPIO26, Pull::None);
     let iv = GenericSx127xInterfaceVariant::new(lora_reset, lora_dio0, None, None).unwrap();
 
     let config = sx127x::Config {
